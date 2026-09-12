@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Acme - version 1</title>
+    <link rel="stylesheet" href="../shared/style.css">
+</head>
+<body>
+    <header class="top" id="top">
+        <a class="logo" href="#top" aria-label="Acme home">ACME</a>
+        <nav aria-label="Main">
+            <a href="#features">Features</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#faq">FAQ</a>
+        </nav>
+    </header>
+    <main id="main">
+        <section class="hero" id="hero">
+            <div class="hero-copy">
+                <h1>Ship UI changes with confidence</h1>
+                <p>Compare any two versions of a page and see exactly what moved, grew, or disappeared.</p>
+                <button type="button" data-testid="cta">Get started</button>
+            </div>
+            <figure class="hero-art">
+                <div class="art" role="img" aria-label="Illustration"></div>
+            </figure>
+        </section>
+        <section class="features" id="features">
+            <h2>Features</h2>
+            <div class="cards">
+                <article class="card" data-testid="card-align">
+                    <h3>Aligns first</h3>
+                    <p>Zoom, collapse and resize are handled before a single pixel is compared.</p>
+                </article>
+                <article class="card" data-testid="card-locators">
+                    <h3>Names the change</h3>
+                    <p>Every region is reported with the locator of the element behind it.</p>
+                </article>
+                <article class="card" data-testid="card-reports">
+                    <h3>Reports that travel</h3>
+                    <p>Self-contained HTML reports with a slider, flip and overlay viewer.</p>
+                </article>
+            </div>
+        </section>
+        <section class="pricing" id="pricing">
+            <h2>Pricing</h2>
+            <div class="plans">
+                <div class="plan" id="plan-free">
+                    <h3>Free</h3>
+                    <div class="price">$0</div>
+                    <ul><li>Local comparisons</li><li>HTML reports</li></ul>
+                </div>
+                <div class="plan" id="plan-team">
+                    <h3>Team</h3>
+                    <div class="price">$29</div>
+                    <ul><li>Baseline tracking</li><li>CI gating</li></ul>
+                </div>
+            </div>
+        </section>
+        <details class="faq" id="faq" open>
+            <summary>Frequently asked questions</summary>
+            <dl>
+                <dt>Does it need a baseline?</dt>
+                <dd>No. Any two images or URLs can be compared directly.</dd>
+                <dt>What about different screen sizes?</dt>
+                <dd>The candidate is aligned onto the baseline before comparing.</dd>
+                <dt>Can it run in CI?</dt>
+                <dd>Yes, the CLI exits non-zero when differences are found.</dd>
+            </dl>
+        </details>
+    </main>
+    <footer id="footer">
+        <p>&copy; 2026 Acme</p>
+        <a href="#top">Back to top</a>
+    </footer>
+</body>
+</html>

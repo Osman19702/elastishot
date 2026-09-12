@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.elastishot/
+acceptance/out/
+test-results/
+*.tgz
+.DS_Store
+Thumbs.db

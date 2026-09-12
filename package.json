@@ -1,0 +1,95 @@
+{
+  "name": "elastishot",
+  "version": "0.1.0",
+  "description": "Elastic screenshot comparison for UI change detection: align two screenshots or URLs with feature analysis, then report the regions and DOM locators that changed.",
+  "keywords": ["visual-regression", "screenshot", "diff", "image-comparison", "playwright", "opencv", "qa", "ui-testing"],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  },
+  "bin": {
+    "elastishot": "bin/elastishot.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "default": "./dist/engine/index.js"
+    },
+    "./locators": {
+      "types": "./dist/locators/index.d.ts",
+      "default": "./dist/locators/index.js"
+    },
+    "./report": {
+      "types": "./dist/report/index.d.ts",
+      "default": "./dist/report/index.js"
+    },
+    "./viewer": {
+      "types": "./dist/viewer/index.d.ts",
+      "browser": "./dist/viewer/elastishot-viewer.js",
+      "default": "./dist/viewer/index.js"
+    },
+    "./capture": {
+      "types": "./dist/capture/index.d.ts",
+      "node": "./dist/capture/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "node": "./dist/node/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "./dist/viewer/elastishot-viewer.js"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:viewer": "node scripts/build-viewer.mjs",
+    "build": "npm run build:viewer && tsc -p tsconfig.build.json",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "test:engine": "node --test \"test/engine/*.test.ts\"",
+    "test:browser": "node --test \"test/capture/*.test.ts\" \"test/viewer/*.test.ts\" \"test/cli/*.test.ts\"",
+    "test:acceptance": "npm run build && node --test acceptance/*.acceptance.test.js",
+    "test:trace": "node acceptance/trace.js",
+    "test:all": "npm run typecheck && npm run check:layering && npm test && npm run test:engine && npm run test:browser && npm run test:acceptance && npm run test:trace",
+    "check:layering": "node scripts/check-layering.mjs",
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "spike": "node scripts/spike-opencv.mjs"
+  },
+  "dependencies": {
+    "@techstark/opencv-js": "^4.12.0-release.1",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0"
+  },
+  "peerDependencies": {
+    "playwright": "^1.63.0"
+  },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "@types/pngjs": "^6.0.5",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.63.0",
+    "typescript": "^5.9.3"
+  }
+}

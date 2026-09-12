@@ -1,0 +1,33 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #ffffff; line-height: 1.4; }
+a { color: #1d4ed8; text-decoration: none; }
+.top { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 40px; background: #111827; color: #f9fafb; }
+.top .logo { color: #f9fafb; font-weight: 700; font-size: 22px; letter-spacing: 1px; }
+.top nav a { color: #d1d5db; margin-left: 28px; font-size: 15px; }
+main { width: 1200px; margin: 0 auto; padding: 0 20px 40px; }
+.hero { display: grid; grid-template-columns: 1fr 420px; gap: 40px; align-items: center; padding: 56px 0 40px; }
+.hero h1 { font-size: 40px; line-height: 1.15; margin: 0 0 16px; }
+.hero p { font-size: 18px; color: #4b5563; margin: 0 0 28px; }
+.hero button { font: inherit; font-size: 17px; font-weight: 600; padding: 12px 26px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; cursor: pointer; }
+.hero-art { margin: 0; width: 420px; height: 280px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.art { width: 360px; height: 240px; border-radius: 16px; background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 60%, #1d4ed8 100%); position: relative; }
+.art::before { content: ''; position: absolute; left: 32px; top: 36px; width: 120px; height: 120px; border-radius: 50%; background: #fbbf24; }
+.art::after { content: ''; position: absolute; right: 36px; bottom: 30px; width: 150px; height: 70px; border-radius: 10px; background: #111827; }
+.features h2, .faq summary, .pricing h2 { font-size: 26px; margin: 0 0 20px; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 22px; background: #f9fafb; }
+.card h3 { margin: 0 0 8px; font-size: 18px; }
+.card p { margin: 0; color: #4b5563; font-size: 15px; }
+.pricing { margin-top: 44px; }
+.plans { display: flex; gap: 24px; }
+.plan { flex: 1; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; }
+.plan .price { font-size: 30px; font-weight: 700; margin: 8px 0 12px; }
+.plan ul { margin: 0; padding-left: 18px; color: #4b5563; font-size: 15px; }
+.faq { margin-top: 44px; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 24px; }
+.faq summary { cursor: pointer; }
+.faq dl { margin: 12px 0 0; }
+.faq dt { font-weight: 600; margin-top: 14px; }
+.faq dd { margin: 4px 0 0; color: #4b5563; }
+footer { border-top: 1px solid #e5e7eb; padding: 24px 40px; display: flex; justify-content: space-between; align-items: center; color: #6b7280; font-size: 14px; }
+.badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #dcfce7; color: #166534; font-weight: 600; font-size: 13px; margin-left: 12px; }
