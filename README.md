@@ -165,6 +165,8 @@ Images are written as files next to the pages, thumbnails are inlined so `index.
 ## Troubleshooting
 
 - **"capturing pages needs Playwright"**: `npm install -D playwright && npx playwright install chromium`. Playwright is an optional peer dependency; image-only use does not need it.
+- **Strict Content-Security-Policy**: the animation freeze, `hide` and `mask` styles are applied as a constructed stylesheet, which `style-src` does not govern, so pages without `'unsafe-inline'` capture unchanged.
+- **Dark and light themes**: give a target `capture: { colorScheme: 'dark' }` (emulated `prefers-color-scheme`) and another `'light'`; each becomes its own baseline.
 - **Flaky captures**: freeze what moves. `--hide .cookie-banner`, `--wait-for "[data-testid=ready]"`, `capture.mask` in the config; animations and transitions are already disabled during capture.
 - **A full-page capture is wider than the viewport**: the page itself is wider (a fixed-width layout); Playwright captures the scrollable area. Use a viewport at least as wide as the page or accept the width.
 - **Too many small regions**: raise `diff.threshold` (default 0.1) in the config `compare` section, or lower `diff.maxRegions`. `diff.antialiasTolerance` defaults to `auto`: 1 px when the candidate had to be resampled (zoom, rotation, fallback alignment) and 0 on same-scale pages, so a changed digit in small text is reported. Set it to a number to force one behaviour.

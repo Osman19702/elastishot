@@ -36,6 +36,8 @@ export interface CaptureOptions {
   waitUntil?: 'load' | 'domcontentloaded' | 'networkidle' | 'commit'
   /** Selector to wait for, milliseconds to wait, or a custom wait. */
   waitFor?: string | number | ((page: Page) => Promise<void>)
+  /** Emulated prefers-color-scheme for the capture (default: the browser's, which is light). */
+  colorScheme?: 'light' | 'dark'
   /** Selectors made invisible (layout kept). */
   hide?: string[]
   /** Selectors painted solid. */
@@ -63,6 +65,7 @@ interface Resolved {
   fullPage: boolean
   waitUntil: NonNullable<CaptureOptions['waitUntil']>
   waitFor?: CaptureOptions['waitFor']
+  colorScheme?: 'light' | 'dark'
   hide: string[]
   mask: string[]
   freezeAnimations: boolean
@@ -83,6 +86,7 @@ function resolve(o: CaptureOptions): Resolved {
     fullPage,
     waitUntil: o.waitUntil ?? 'networkidle',
     ...(o.waitFor !== undefined ? { waitFor: o.waitFor } : {}),
+    ...(o.colorScheme ? { colorScheme: o.colorScheme } : {}),
     hide: o.hide ?? [],
     mask: o.mask ?? [],
     freezeAnimations: o.freezeAnimations ?? true,
@@ -159,6 +163,7 @@ async function withContext<T>(browser: Browser, r: Resolved, fn: (page: Page) =>
       viewport: r.viewport,
       deviceScaleFactor: r.deviceScaleFactor,
       reducedMotion: 'reduce',
+      ...(r.colorScheme ? { colorScheme: r.colorScheme } : {}),
       ...(r.headers ? { extraHTTPHeaders: r.headers } : {}),
       ...(r.storageState ? { storageState: r.storageState } : {}),
     })

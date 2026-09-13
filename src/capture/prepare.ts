@@ -16,18 +16,39 @@ const FREEZE_CSS = `*, *::before, *::after {
   scroll-behavior: auto !important;
 }`
 
+/**
+ * Add a stylesheet the way a strict Content-Security-Policy allows: a
+ * constructed sheet is CSSOM, which `style-src` does not govern, whereas an
+ * injected <style> element is refused by any policy without 'unsafe-inline'.
+ * Falls back to a <style> element where constructed sheets are unsupported.
+ */
+async function injectCss(page: Page, css: string): Promise<void> {
+  const adopted = await page.evaluate((text) => {
+    try {
+      const sheet = new CSSStyleSheet()
+      sheet.replaceSync(text)
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+      return true
+    } catch {
+      return false
+    }
+  }, css)
+  if (!adopted) await page.addStyleTag({ content: css })
+}
+
 /** Settle the page so two captures of the same state produce the same pixels. */
 export async function preparePage(page: Page, options: PrepareOptions): Promise<void> {
-  if (options.freezeAnimations) await page.addStyleTag({ content: FREEZE_CSS })
+  if (options.freezeAnimations) await injectCss(page, FREEZE_CSS)
   if (options.hide.length) {
-    await page.addStyleTag({ content: `${options.hide.join(', ')} { visibility: hidden !important; }` })
+    await injectCss(page, `${options.hide.join(', ')} { visibility: hidden !important; }`)
   }
   if (options.mask.length) {
     const sel = options.mask.join(', ')
-    await page.addStyleTag({
-      content: `${sel} { background: #ff00ff !important; color: transparent !important; box-shadow: none !important; background-image: none !important; }
+    await injectCss(
+      page,
+      `${sel} { background: #ff00ff !important; color: transparent !important; box-shadow: none !important; background-image: none !important; }
 ${options.mask.map((s) => `${s} *`).join(', ')} { visibility: hidden !important; }`,
-    })
+    )
   }
   const w = options.waitFor
   if (typeof w === 'number') await page.waitForTimeout(w)
