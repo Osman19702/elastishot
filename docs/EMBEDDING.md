@@ -53,10 +53,10 @@ const { result, locators, pass, failReasons } = await comparePair(
 </elastishot-viewer>
 ```
 
-- Attributes: `baseline-src`, `candidate-src`, `diff-src`, `warped-src`, `mode` (`slider`, `slider-h`, `flip`, `blink`, `overlay`, `diff`), `position` (0-100), `opacity` (0-1), `flip-side` (`baseline` | `candidate`), `blink-ms`, `zoom` (`fit` or a number), `show-regions`, `no-toolbar`.
+- Attributes: `baseline-src`, `candidate-src`, `diff-src`, `warped-src`, `mode` (`slider`, `flip`, `blink`, `overlay`, `diff`), `position` (0-100), `opacity` (0-1), `flip-side` (`baseline` | `candidate`), `blink-ms`, `zoom` (`fit` or a number), `show-regions`, `no-toolbar`.
 - Properties: `regions`, `locators`, `alignment` (objects), `baseline` and `candidate` (string or Blob). Method: `selectRegion(id | null)`.
 - Events: `elastishot-ready`, `elastishot-mode-change` (`detail.mode`), `elastishot-region-select` (`detail.region`, `detail.locators`).
-- Keyboard: focus the stage and press 1-6 for modes, `f` to change the flipped side, space to pause blinking, Escape to clear the selection; the slider handle takes arrows, Home and End.
+- Keyboard: focus the stage and press 1-5 for modes, `f` to change the flipped side, space to pause blinking, Escape to clear the selection; the slider handle takes arrows, Home and End.
 - Theming: `--es-bg`, `--es-fg`, `--es-line`, `--es-accent`, `--es-handle`, `--es-diff`, `--es-chip-bg`, `--es-region-added`, `--es-region-removed`, `--es-region-changed`, `--es-region-moved`, `--es-font`; parts `toolbar`, `stage`, `handle`, `region`, `chip`.
 
 When `warped-src` is given the candidate is shown pixel-exact in baseline space (the engine's `artifacts.warpedCandidate`). Without it the candidate image is placed with a CSS transform built from `alignment.transform`.

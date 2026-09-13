@@ -1,0 +1,260 @@
+<title>Elastishot</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f7f8fb; --paper: #ffffff; --ink: #0e1420; --muted: #5a6373; --line: #dde2ea; --soft: #eef1f7;
+  --accent: #c026d3; --accent-ink: #ffffff; --accent-soft: #fbe8ff;
+  --added: #16a34a; --removed: #dc2626; --changed: #c026d3; --moved: #2563eb;
+  --code: #eaeef3;
+  --display: 'Sora', 'Segoe UI', system-ui, sans-serif; --body: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif; --mono: 'JetBrains Mono', Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --ground: #0b0f16; --paper: #131923; --ink: #e9edf3; --muted: #99a3b3; --line: #273041; --soft: #1a2130;
+  --accent: #e879f9; --accent-ink: #1a0520; --accent-soft: #3b1443;
+  --added: #4ade80; --removed: #f87171; --changed: #e879f9; --moved: #93c5fd; --code: #1e2634; } }
+:root[data-theme="dark"] {
+  --ground: #0b0f16; --paper: #131923; --ink: #e9edf3; --muted: #99a3b3; --line: #273041; --soft: #1a2130;
+  --accent: #e879f9; --accent-ink: #1a0520; --accent-soft: #3b1443;
+  --added: #4ade80; --removed: #f87171; --changed: #e879f9; --moved: #93c5fd; --code: #1e2634; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 17px/1.55 var(--body); padding-inline: 16px; padding-block: 0 64px; }
+.wrap { max-width: 1120px; margin: 0 auto; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.12; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2.2rem, 4.5vw, 3.4rem); font-weight: 800; }
+h2 { font-size: clamp(1.5rem, 2.6vw, 2rem); font-weight: 700; }
+h3 { font-size: 1.1rem; font-weight: 600; }
+p { margin: .6rem 0; max-width: 62ch; }
+a { color: var(--accent); }
+code { font-family: var(--mono); font-size: .86em; background: var(--code); padding: .06em .38em; border-radius: 4px; }
+pre { background: var(--code); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: .88rem; line-height: 1.5; margin: 0; }
+pre code { background: none; padding: 0; font-size: inherit; }
+.eyebrow { font-family: var(--display); font-size: .76rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 0; flex-wrap: wrap; }
+.brand { display: inline-flex; align-items: center; gap: 10px; font-family: var(--display); font-weight: 800; font-size: 1.25rem; color: var(--ink); text-decoration: none; }
+.brand svg { width: 30px; height: 30px; }
+.topbar nav { display: flex; gap: 18px; flex-wrap: wrap; font-size: .95rem; } .topbar nav a { color: var(--muted); text-decoration: none; } .topbar nav a:hover { color: var(--ink); }
+.hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 32px; align-items: start; padding: 32px 0 8px; }
+@media (max-width: 900px) { .hero { grid-template-columns: 1fr; } }
+.hero .lead { font-size: 1.2rem; color: var(--muted); }
+.cta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.btn { display: inline-block; font-family: var(--display); font-weight: 600; font-size: .95rem; padding: 11px 18px; border-radius: 8px; text-decoration: none; border: 1px solid transparent; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); } .btn.ghost { border-color: var(--line); color: var(--ink); background: var(--paper); }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 22px; color: var(--muted); font-size: .92rem; }
+.facts b { color: var(--ink); font-family: var(--display); font-weight: 600; }
+.demo { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.demo .head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; margin-bottom: 8px; }
+.demo .head h3 { font-size: 1rem; } .demo .head .stat { font-family: var(--display); font-size: .9rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.demo .stat b { color: var(--ink); }
+elastishot-viewer { display: block; --es-accent: var(--accent); --es-line: var(--line); --es-bg: var(--paper); --es-fg: var(--ink); }
+elastishot-viewer::part(stage) { max-height: 520px; }
+.demo .cap { color: var(--muted); font-size: .88rem; margin: 10px 0 0; max-width: none; }
+.chips { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--soft); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 6px; font-size: .82rem; }
+.chip .kind { font-family: var(--display); font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: 999px; color: #fff; }
+.chip.k-added .kind { background: var(--added); } .chip.k-removed .kind { background: var(--removed); } .chip.k-changed .kind { background: var(--changed); } .chip.k-moved .kind { background: var(--moved); }
+.chip code { background: none; padding: 0; font-size: .8rem; }
+section { padding: 56px 0 8px; }
+section > .eyebrow + h2 { margin-top: 6px; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 22px; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; }
+.card h3 { margin-bottom: 6px; } .card p { margin: 0; color: var(--muted); max-width: none; }
+.card .then { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); color: var(--ink); }
+.card .then b { color: var(--accent); font-family: var(--display); font-weight: 600; }
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px 28px; margin-top: 22px; }
+.feature { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start; padding: 12px 0; border-top: 1px solid var(--line); }
+.feature .ico { width: 40px; height: 40px; border-radius: 10px; background: var(--accent-soft); display: grid; place-items: center; color: var(--accent); }
+.feature .ico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.feature p { margin: 2px 0 0; color: var(--muted); max-width: none; font-size: .96rem; }
+.steps { counter-reset: s; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 22px; }
+.step { counter-increment: s; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 16px; position: relative; }
+.step::before { content: counter(s); position: absolute; top: -12px; left: 14px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-family: var(--display); font-weight: 700; font-size: .85rem; display: grid; place-items: center; }
+.step h3 { font-size: 1rem; margin: 6px 0 4px; } .step p { margin: 0; color: var(--muted); font-size: .92rem; max-width: none; }
+.proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 22px; }
+.num { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+.num .v { font-family: var(--display); font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; } .num .l { color: var(--muted); font-size: .92rem; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 22px; }
+.two h3 { margin-bottom: 8px; }
+video { width: 100%; max-width: 100%; border-radius: 12px; border: 1px solid var(--line); background: #000; display: block; margin-top: 22px; }
+.cap { color: var(--muted); font-size: .9rem; }
+.timeline { list-style: none; margin: 22px 0 0; padding: 0; border-left: 2px solid var(--line); }
+.timeline li { position: relative; padding: 0 0 26px 26px; }
+.timeline li::before { content: ''; position: absolute; left: -8px; top: 8px; width: 14px; height: 14px; border-radius: 50%; background: var(--paper); border: 3px solid var(--accent); }
+.timeline li.done::before { background: var(--accent); }
+.timeline .when { font-family: var(--display); font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.timeline h3 { margin: 2px 0 6px; } .timeline ul { margin: 0; padding-left: 18px; color: var(--muted); } .timeline li li { padding: 0; margin: 2px 0; } .timeline li li::before { display: none; }
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 18px; }
+.principle { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; } .principle b { font-family: var(--display); display: block; } .principle span { color: var(--muted); font-size: .95rem; }
+footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+<div class="wrap">
+<header class="topbar">
+  <a class="brand" href="#top"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="6" width="16" height="20" rx="3" fill="none" stroke="currentColor" stroke-width="2.4"/><rect x="13" y="10" width="16" height="16" rx="3" fill="var(--accent)" opacity=".9"/></svg>Elastishot</a>
+  <nav aria-label="Sections"><a href="#why">Why</a><a href="#features">Features</a><a href="#digit">Small changes</a><a href="#how">How it works</a><a href="#proof">Proof</a><a href="#start">Get started</a><a href="#roadmap">Roadmap</a></nav>
+</header>
+
+<section class="hero" id="top">
+  <div>
+    <div class="eyebrow">Visual comparison for web UIs · MIT · v{{VERSION}}</div>
+    <h1>Align first. Then diff. Then name the locator.</h1>
+    <p class="lead">Pixel diffs light up the whole page when a banner pushes everything down or a section collapses. Elastishot lines the two screenshots up the way a person would, diffs what is left, and tells you which element changed.</p>
+    <div class="cta"><a class="btn primary" href="#start">Get started</a><a class="btn ghost" href="#digit">See a one-digit change caught</a></div>
+    <div class="facts"><span><b>Zoom, crop, shift</b> aligned</span><span><b>Collapse, insert</b> absorbed</span><span><b>Regions</b> named by test id, role or CSS path</span><span><b>Local</b>, no telemetry</span></div>
+  </div>
+  <div class="demo">
+    <div class="head"><h3>Live: a release with five changes</h3><span class="stat">similarity <b>{{RELEASE_SIMILARITY}}</b> · {{RELEASE_COUNTS}}</span></div>
+    <elastishot-viewer id="v-release" baseline-src="demo/release-baseline.png" candidate-src="demo/release-candidate.png" diff-src="demo/release-diff.png" mode="slider" show-regions>
+      <script type="application/json" id="d-release">{{RELEASE_JSON}}</script>
+    </elastishot-viewer>
+    <p class="cap">Drag the handle or use the modes. Build 1 of the Lumen lab page against build 7: a banner pushed the page down, the version badge changed, an FAQ opened, the chart got new data and a button was renamed. Boxes are the regions Elastishot reports; hover one for its locator.</p>
+    <ul class="chips">{{RELEASE_CHIPS}}</ul>
+  </div>
+</section>
+
+<section id="why">
+  <div class="eyebrow">The problem</div>
+  <h2>Pixel diffs answer the wrong question</h2>
+  <p>They ask "is this pixel the same?" A tester asks "what changed?". Three everyday situations break the first question completely.</p>
+  <div class="grid3">
+    <div class="card"><h3>A banner appears at the top</h3><p>Every pixel below it moves down. A pixel diff marks the entire page; the one real change is buried.</p><p class="then"><b>Elastishot</b> matches the strips of the page in sequence, reports one added region and compares the rest in place.</p></div>
+    <div class="card"><h3>A section collapses</h3><p>Content below jumps up by its height. The diff says everything after the FAQ changed.</p><p class="then"><b>Elastishot</b> reports the removed rows once and keeps the footer matched.</p></div>
+    <div class="card"><h3>The capture is zoomed or cropped</h3><p>A 320 px crop and a 1080 px full page share no pixel grid. Same-size comparisons refuse or resize blindly.</p><p class="then"><b>Elastishot</b> recovers the scale and offset from features, then compares only what both captures show.</p></div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="eyebrow">What you get</div>
+  <h2>Everything a review needs, from capture to verdict</h2>
+  <div class="features">
+    <div class="feature"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="3"/></svg></div><div><h3>Feature alignment</h3><p>ORB keypoints and RANSAC recover zoom, crop and whole-pixel shifts; same-size captures are snapped to an exact shift so nothing is resampled.</p></div></div>
+    <div class="feature"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h16"/></svg></div><div><h3>Structural alignment</h3><p>The page is cut into strips and matched by sequence alignment, so inserted banners and collapsed sections become one region each.</p></div></div>
+    <div class="feature"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 12h8M12 8v8"/></svg></div><div><h3>Four kinds of region</h3><p>Added, removed, changed and moved, each with a score, a box on both sides and the pixels behind it. Moves are found by template matching.</p></div></div>
+    <div class="feature"><div class="ico"><svg viewBox="0 0 24 24"><path d="M8 4h8l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M9 13l2 2 4-4"/></svg></div><div><h3>Named elements</h3><p>Playwright captures record an element map; every region is attributed to the smallest element covering it: test id first, then id, role and name, then a CSS path.</p></div></div>
+    <div class="feature"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 5v14"/></svg></div><div><h3>A viewer people actually use</h3><p>Slider, flip, blink, overlay and diff, as one web component you can drop into your own tool. It is what you are using above.</p></div></div>
+    <div class="feature"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 19h16M7 16V9M12 16V5M17 16v-6"/></svg></div><div><h3>Reports for people and for CI</h3><p>A summary page, a page per pair, JSON with the full result, JUnit XML, exit codes 0, 1 and 2. Warnings from the engine reach the page.</p></div></div>
+    <div class="feature"><div class="ico"><svg viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 17h7"/></svg></div><div><h3>A CLI built for baselines</h3><p><code>run</code> captures every target and viewport in a config, compares against approved baselines, and <code>approve</code> promotes a run. Files in your repo, nothing else.</p></div></div>
+    <div class="feature"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="4"/></svg></div><div><h3>Honest when unsure</h3><p>Error pages, low feature spread, fallbacks and partial coverage are warnings on the pair, never silent. A capture that answered 404 says so.</p></div></div>
+  </div>
+</section>
+
+<section id="digit">
+  <div class="eyebrow">Small changes</div>
+  <h2>One digit, one price, one word</h2>
+  <p>Release checks fail on the small things: a version badge, a price, a renamed button. Same-size pages are compared pixel for pixel, so a single changed character is a region with a name, not noise that a tolerance swallowed.</p>
+  <div class="demo" style="margin-top:22px">
+    <div class="head"><h3>Live: six character-level changes</h3><span class="stat">similarity <b>{{TEXT_SIMILARITY}}</b> · compared in {{TEXT_SECONDS}} s</span></div>
+    <elastishot-viewer id="v-text" baseline-src="demo/text-baseline.png" candidate-src="demo/text-candidate.png" diff-src="demo/text-diff.png" mode="blink" show-regions>
+      <script type="application/json" id="d-text">{{TEXT_JSON}}</script>
+    </elastishot-viewer>
+    <p class="cap">Blink mode alternates the two builds. v2.4.1 became v2.4.2, $29 became $39, 99.95% became 99.99%, "recieve" was fixed, a sentence was appended and a button grew a word. Switch to Diff to see the exact pixels.</p>
+    <ul class="chips">{{TEXT_CHIPS}}</ul>
+  </div>
+</section>
+
+<section id="how">
+  <div class="eyebrow">How it works</div>
+  <h2>Five stages, every one of them reported</h2>
+  <div class="steps">
+    <div class="step"><h3>Capture</h3><p>Playwright opens the URL, freezes animations, hides what you tell it to, screenshots the full page and records an element map.</p></div>
+    <div class="step"><h3>Global alignment</h3><p>Features on both captures vote for a scale and offset; the candidate is warped onto the baseline's pixel grid, exactly when the pages share a size.</p></div>
+    <div class="step"><h3>Structural alignment</h3><p>Horizontal strips are matched in sequence; runs that only exist on one side become inserted or deleted bands.</p></div>
+    <div class="step"><h3>Diff and classify</h3><p>Matched bands are diffed in perceptual colour space, components are merged into regions and moved blocks are recognised.</p></div>
+    <div class="step"><h3>Name and report</h3><p>Regions meet the element maps; the pair page, the summary, JSON and JUnit are written; the exit code tells CI.</p></div>
+  </div>
+</section>
+
+<section id="proof">
+  <div class="eyebrow">Proof, not promises</div>
+  <h2>Measured on a lab with ground truth and on real sites</h2>
+  <p>The repository ships a localhost lab: one page in seven builds, each change written down with the element's test id. Every run is scored against that list. The numbers below come from the run that produced the demos on this page.</p>
+  <div class="proof">
+    <div class="num"><div class="v">{{LAB_FOUND}} / {{LAB_EXPECTED}}</div><div class="l">expected changes found across {{LAB_PAIRS}} pairs</div></div>
+    <div class="num"><div class="v">{{LAB_NOISE}}</div><div class="l">regions on elements nobody changed, score ≥ 0.2</div></div>
+    <div class="num"><div class="v">{{LAB_SECONDS}} s</div><div class="l">for the whole lab run, captures included</div></div>
+    <div class="num"><div class="v">160</div><div class="l">automated tests in four tiers, 28 of them Gherkin scenarios driving the CLI</div></div>
+  </div>
+  <p style="margin-top:18px">A field test on thirteen real pairs (gov.uk, playwright.dev, nodejs.org, versioned docs of Python, Node and Bootstrap) found seven defects in the first candidate, from a hidden one-digit change to a hero reported as removed. All seven were fixed and the set re-run before this page was written; the write-up is linked from the repository.</p>
+  {{VIDEO_BLOCK}}
+</section>
+
+<section id="start">
+  <div class="eyebrow">Get started</div>
+  <h2>Two captures in, a verdict out</h2>
+  <div class="two">
+    <div>
+      <h3>Compare two URLs or two images</h3>
+      <pre><code>npm install -D elastishot playwright
+npx playwright install chromium
+
+npx elastishot compare https://staging.example.com/ \
+                       https://example.com/ --full-page
+# exit 1: differences, report in .elastishot/runs/&lt;run&gt;/index.html</code></pre>
+    </div>
+    <div>
+      <h3>Track targets across deployments</h3>
+      <pre><code>// elastishot.config.js
+export default {
+  viewports: [{ name: 'desktop', width: 1280, height: 800 },
+              { name: 'mobile', width: 390, height: 844 }],
+  capture: { fullPage: true },
+  targets: [{ name: 'home', url: 'https://example.com/' },
+            { name: 'pricing', url: 'https://example.com/pricing' }],
+}
+// npx elastishot run --update   # approve the current state
+// npx elastishot run --junit    # every deploy after that</code></pre>
+    </div>
+    <div>
+      <h3>Embed the viewer</h3>
+      <pre><code>import 'elastishot/viewer'
+
+&lt;elastishot-viewer baseline-src="a.png" candidate-src="b.png"
+                   diff-src="diff.png" mode="slider" show-regions&gt;
+&lt;/elastishot-viewer&gt;
+// viewer.regions = result.regions; viewer.locators = result.locators</code></pre>
+    </div>
+    <div>
+      <h3>Use the engine from Node</h3>
+      <pre><code>import { comparePair } from 'elastishot'
+import { capture } from 'elastishot/capture'
+
+const before = await capture('https://example.com/', { fullPage: true })
+const after  = await capture('https://staging.example.com/', { fullPage: true })
+const { pass, result, locators } = await comparePair(before, after)
+console.log(pass, result.summary.similarity, locators.changedLocators[0])</code></pre>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="eyebrow">Roadmap</div>
+  <h2>Where it goes from here</h2>
+  <p>Dates are targets; the order is the commitment. The full document lives in the repository as <code>docs/ROADMAP.md</code>.</p>
+  <ul class="timeline">
+    <li class="done"><div class="when">September 2026 · done</div><h3>0.1 Foundation</h3><ul><li>Feature and structural alignment, four region kinds, move detection</li><li>Element maps and named regions, viewer, reports, JUnit, CLI with baselines</li><li>160 tests, a 13-pair field test, the Lumen lab with ground truth</li><li>Left for the tag: NOTICE, provenance release workflow, npm publish</li></ul></li>
+    <li><div class="when">October 2026</div><h3>0.2 Trust</h3><ul><li>Column-axis structural alignment for sidebars and reordered columns</li><li>Moves named on both ends; resized elements in the changed-elements table</li><li>Ignore by selector; flaky-region memory across runs</li><li>GitHub Action; worker threads and a SIMD build for speed</li></ul></li>
+    <li><div class="when">November to December 2026</div><h3>0.3 Teams</h3><ul><li>Approve from the report page; run history against the previous run</li><li>Component mode for Storybook and URL lists; Firefox and WebKit captures</li><li>Reporters as plugins: pull-request comment, Slack, S3</li></ul></li>
+    <li><div class="when">First quarter 2027</div><h3>1.0 Stable</h3><ul><li>Report and element-map schemas frozen; plugin API with a deprecation policy</li><li>Published benchmark against pixelmatch and BackstopJS on the lab and the field set</li><li>Documentation site, report accessibility</li></ul></li>
+    <li><div class="when">2027</div><h3>Hosted, as an opt-in reporter</h3><ul><li>Baselines per branch, history, shareable links, GitHub App checks, browser approval</li><li>The open core stays complete; the CLI never contacts the service unless configured</li></ul></li>
+  </ul>
+  <div class="principles">
+    <div class="principle"><b>MIT, permanently</b><span>No relicensing, no gating of local features.</span></div>
+    <div class="principle"><b>No telemetry</b><span>The CLI contacts only the URLs you pass it.</span></div>
+    <div class="principle"><b>Local first</b><span>Baselines and reports are files in your repo.</span></div>
+    <div class="principle"><b>Real pairs first</b><span>A screenshot pair Elastishot gets wrong is the fastest way onto this list.</span></div>
+  </div>
+</section>
+
+<footer><span>Elastishot · MIT licence · built on opencv.js and Playwright</span><span>Source: github.com/Osman19702/elastishot</span></footer>
+</div>
+<script type="module" src="viewer.js"></script>
+<script type="module">
+customElements.whenDefined('elastishot-viewer').then(() => {
+  for (const [id, dataId] of [['v-release', 'd-release'], ['v-text', 'd-text']]) {
+    const viewer = document.getElementById(id)
+    const data = JSON.parse(document.getElementById(dataId).textContent)
+    viewer.regions = data.regions
+    viewer.locators = data.locators
+    viewer.alignment = data.alignment
+  }
+})
+</script>

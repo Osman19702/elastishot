@@ -159,6 +159,7 @@ export type WarningCode =
   | 'JPEG_SOURCE'
   | 'ALPHA_FLATTENED'
   | 'PARTIAL_COVERAGE'
+  | 'CAPTURE_ERROR_PAGE'
 
 export interface Warning {
   code: WarningCode
@@ -229,8 +230,13 @@ export interface DiffOptions {
   method?: 'yiq' | 'gray' | 'ssim'
   /** 0..1, pixelmatch-style colour distance threshold. */
   threshold?: number
-  /** Specks thinner than this many pixels are treated as antialiasing. */
-  antialiasTolerance?: number
+  /**
+   * Specks thinner than this many pixels are treated as antialiasing. 'auto'
+   * (the default) uses 1 px only when the candidate had to be resampled
+   * (zoom, rotation or a fallback alignment) and 0 otherwise, so a changed
+   * digit in small text is never absorbed on same-scale pages.
+   */
+  antialiasTolerance?: number | 'auto'
   mergeGapPx?: number
   minRegionAreaPx?: number
   maxRegions?: number
@@ -319,6 +325,10 @@ export interface SnapshotMeta {
   fullPage: boolean
   gitSha?: string
   elastishotVersion: string
+  /** HTTP status of the main document when the page was captured. */
+  httpStatus?: number
+  /** Document title at capture time. */
+  title?: string
   target?: string
   viewportName?: string
   approvedAt?: string

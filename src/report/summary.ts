@@ -1,5 +1,5 @@
 import type { RegionKind } from '../core/types.ts'
-import { escapeHtml, formatDate, layout, pct, STATUS_LABEL } from './html.ts'
+import { displayName, escapeHtml, formatDate, layout, pct, shortLocator, STATUS_LABEL } from './html.ts'
 import type { PairReport, ReportJson } from './schema.ts'
 
 export interface SummaryOptions {
@@ -27,11 +27,19 @@ function thumbs(p: PairReport): string {
 }
 
 function locatorList(p: PairReport, max: number): string {
-  const items = p.locators?.changedLocators.slice(0, max) ?? []
+  // Elements with pixel evidence first (they are sorted that way); the DOM-only
+  // presence changes only fill the list when nothing else is there.
+  const all = p.locators?.changedLocators ?? []
+  const onScreen = all.filter((l) => l.evidence.includes('pixels'))
+  const items = (onScreen.length ? onScreen : all).slice(0, max)
   if (!items.length) return ''
+  const rest = onScreen.length > max ? `<li class="muted">and ${onScreen.length - max} more changed elements</li>` : ''
   return `<ul class="locators">${items
-    .map((l) => `<li>${escapeHtml(l.name)} <code>${escapeHtml(l.locator)}</code> <span class="muted">${l.kinds.join(', ')}</span></li>`)
-    .join('')}</ul>`
+    .map(
+      (l) =>
+        `<li>${escapeHtml(displayName(l.name))} <code class="loc" title="${escapeHtml(l.locator)}">${escapeHtml(shortLocator(l.locator))}</code> <span class="muted">${l.kinds.join(', ')}${l.regions.length > 1 ? ` · ${l.regions.length} regions` : ''}</span></li>`,
+    )
+    .join('')}${rest}</ul>`
 }
 
 function card(p: PairReport, opts: Required<SummaryOptions>): string {

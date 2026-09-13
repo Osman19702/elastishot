@@ -4,6 +4,7 @@
  */
 
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import { elastishot, image, workspace } from './support/cli.js'
@@ -61,4 +62,16 @@ test('A4 — Two versions of a page are captured and compared by URL', async () 
   assert.ok(locators.includes('role=img[name="Illustration"]'), locators.join(', '))
   assert.ok(locators.includes('[data-testid="cta"]'), locators.join(', '))
   assert.ok(locators.includes('[data-testid="badge"]'), locators.join(', '))
+})
+
+test('A5 — A one-digit change in small text is reported', async () => {
+  const r = await run(['compare', image('base.png'), image('digit.png')])
+  assert.equal(r.code, 1, r.stderr)
+  const pair = report(r).pairs[0]
+  const changed = pair.regions.filter((x) => x.kind === 'changed' && x.score >= 0.05)
+  assert.equal(changed.length, 1, JSON.stringify(pair.regions))
+  const expected = JSON.parse(fs.readFileSync(image('manifest.json'), 'utf8')).cases.digit.expect.box
+  const b = changed[0].boxBaseline
+  assert.ok(b.x <= expected.x && b.y <= expected.y && b.x + b.w >= expected.x + expected.w && b.y + b.h >= expected.y + expected.h, JSON.stringify({ b, expected }))
+  assert.ok(b.w <= 40 && b.h <= 40, JSON.stringify(b))
 })

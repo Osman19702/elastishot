@@ -6,7 +6,7 @@ import { DEFAULT_COMPARE_OPTIONS, resolveCompareOptions } from './options.ts'
 
 test('defaults are complete', () => {
   const o = resolveCompareOptions()
-  assert.equal(o.workingWidth, 1024)
+  assert.equal(o.workingWidth, 1280)
   assert.equal(o.alignMode, 'auto')
   assert.deepEqual(o.thresholds.failOn, ['added', 'removed', 'changed', 'moved'])
   assert.equal(o.diff.method, 'yiq')
@@ -45,4 +45,10 @@ test('invalid values are rejected with the option path', () => {
   bad(() => resolveCompareOptions({ workingWidth: 12.5 }), /workingWidth/)
   bad(() => resolveCompareOptions({ ignoreRegions: [{ x: 0, y: 0, w: 0, h: 5 }] }), /ignoreRegions\[0\]/)
   bad(() => resolveCompareOptions({ diff: { maxRegions: 0 } }), /diff\.maxRegions/)
+})
+
+test('antialiasTolerance defaults to auto and still accepts a pixel count', () => {
+  assert.equal(resolveCompareOptions().diff.antialiasTolerance, 'auto')
+  assert.equal(resolveCompareOptions({ diff: { antialiasTolerance: 2 } }).diff.antialiasTolerance, 2)
+  assert.throws(() => resolveCompareOptions({ diff: { antialiasTolerance: -1 } }), (e: unknown) => isElastishotError(e) && e.code === 'E_OPTIONS')
 })

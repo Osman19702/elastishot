@@ -342,6 +342,21 @@
       "expect": {
         "note": "baseline shrunk to 40% and cropped to 320x320"
       }
+    },
+    "digit": {
+      "file": "digit.png",
+      "width": 800,
+      "height": 864,
+      "expect": {
+        "changed": 1,
+        "box": {
+          "x": 40,
+          "y": 413,
+          "w": 7,
+          "h": 9
+        },
+        "note": "one glyph of 1 px strokes (about 33 pixels), like a changed digit"
+      }
     }
   }
 }

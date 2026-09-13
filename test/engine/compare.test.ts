@@ -5,7 +5,7 @@ import { isElastishotError } from '../../src/core/errors.ts'
 import { iou } from '../../src/core/geometry.ts'
 import { cloneImage, createImage, fillRect } from '../../src/core/image.ts'
 import type { Box, CompareResult, DiffRegion, RegionKind } from '../../src/core/types.ts'
-import { addNoise, collapseRows, createPage, insertRows, moveBlock, padTo, recolor, scaleImage, shiftImage } from '../fixtures/synth.ts'
+import { addNoise, collapseRows, createPage, insertBlankRows, insertRows, moveBlock, padTo, recolor, scaleImage, shiftImage, strokeChange, glyphSpot } from '../fixtures/synth.ts'
 import { engine } from '../support/cv.ts'
 
 before(() => engine.warmup())
@@ -187,4 +187,43 @@ test('content added at the very top of the page is reported', async () => {
   assert.ok(top.anchorBaseline!.y <= 8, describe(r))
   assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
   assert.equal(ofKind(r, 'removed').length, 0, describe(r))
+})
+
+test('a one-pixel stroke change (one digit in small text) is reported', async () => {
+  const s = sections[1]!
+  const at = glyphSpot(s)
+  const r = await engine.compare(base, strokeChange(base, at))
+  const changed = ofKind(r, 'changed')
+  assert.equal(changed.length, 1, describe(r))
+  assert.ok(covers(changed[0]!.boxBaseline, { x: at.x, y: at.y, w: 7, h: 9 }, 0.3), describe(r))
+  assert.equal(r.summary.passed, false, describe(r))
+})
+
+test('a one-pixel stroke change is still reported when the page moved down by whole pixels', async () => {
+  const s = sections[1]!
+  const at = glyphSpot(s)
+  const r = await engine.compare(base, insertBlankRows(strokeChange(base, at), 0, 44))
+  assert.equal(r.summary.alignMethod, 'features-similarity', describe(r))
+  assert.equal(ofKind(r, 'changed').length, 1, describe(r))
+})
+
+test('a block that changed its look entirely does not make the rest of the page "removed"', async () => {
+  // A dark theme on one card plus a taller header: the strips of that card
+  // match nothing, but everything else still lines up on the global alignment.
+  const s = sections[1]!
+  const dark = recolor(base, s.box, [31, 41, 55, 255])
+  const r = await engine.compare(base, insertBlankRows(dark, 0, 40, [31, 41, 55, 255]))
+  const others = [sections[0]!, sections[2]!, sections[3]!]
+  const removedOthers = ofKind(r, 'removed').filter((x) => others.some((o) => covers(x.boxBaseline, o.box, 0.5)))
+  assert.equal(removedOthers.length, 0, describe(r))
+  assert.ok(r.summary.structural.matchedRows >= base.height * 0.6, describe(r))
+  assert.ok(ofKind(r, 'changed').some((x) => covers(x.boxBaseline, s.box, 0.5)), describe(r))
+})
+
+test('a few rows of extra padding do not become an added region', async () => {
+  const s = sections[1]!
+  const r = await engine.compare(base, insertBlankRows(base, s.box.y + s.box.h + GAP / 2, 8))
+  assert.equal(ofKind(r, 'added').length, 0, describe(r))
+  assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
+  assert.ok(r.summary.similarity > 0.98, describe(r))
 })

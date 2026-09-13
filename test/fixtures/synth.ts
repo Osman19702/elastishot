@@ -192,3 +192,20 @@ export function translateBox(b: Box, dx: number, dy: number): Box {
 export function scaleBox(b: Box, factor: number): Box {
   return { x: Math.round(b.x * factor), y: Math.round(b.y * factor), w: Math.round(b.w * factor), h: Math.round(b.h * factor) }
 }
+
+/**
+ * The smallest change a release check must catch: one glyph whose strokes
+ * are one pixel wide, like a digit that changed in a version label. Draws an
+ * "8"-like mark (three 7 px bars and two 9 px stems, about 33 pixels) at `at`.
+ */
+/** A spot inside a section card that is always background: below the last text line, above the border. */
+export function glyphSpot(section: SectionManifest): Point {
+  return { x: section.box.x + 16, y: section.box.y + section.box.h - 11 }
+}
+
+export function strokeChange(img: RasterImage, at: Point, rgba: RGBA = TEXT): RasterImage {
+  const out = cloneImage(img)
+  for (const dy of [0, 4, 8]) fillRect(out, { x: at.x, y: at.y + dy, w: 7, h: 1 }, rgba)
+  for (const dx of [0, 6]) fillRect(out, { x: at.x + dx, y: at.y, w: 1, h: 9 }, rgba)
+  return out
+}

@@ -68,6 +68,12 @@ code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; 
 .side-by-side { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .side-by-side figure { margin: 0; } .side-by-side img { width: 100%; height: auto; border: 1px solid var(--line); background: #fff; }
 .side-by-side figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
 elastishot-viewer { display: block; margin: 12px 0; max-width: 100%; }
+elastishot-viewer::part(stage) { max-height: 80vh; }
+details { margin: 20px 0 0; } details > summary { cursor: pointer; font-weight: 600; font-size: 15px; margin-bottom: 8px; }
+details.more { margin: 8px 0 0; } details.more > summary { font-weight: 500; font-size: 13px; color: var(--muted); }
+td.name { max-width: 34ch; } .loc { white-space: nowrap; } .loc[title] { cursor: help; }
+tr[data-regions] { cursor: pointer; }
+.map-only td { color: var(--muted); }
 .warnings { margin: 0; padding-left: 18px; } .warnings li { color: var(--new); }
 .meta th { width: 160px; color: var(--muted); font-weight: 500; }
 .reasons { margin: 6px 0 0; padding-left: 18px; color: var(--fail); }
@@ -105,4 +111,16 @@ ${scripts}
 </body>
 </html>
 `
+}
+
+/** A readable element label: whitespace collapsed and cut at `max` characters. */
+export function displayName(name: string, max = 70): string {
+  const flat = name.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
+}
+
+/** The tail of a long CSS path; testid, id and role locators are short already. */
+export function shortLocator(locator: string, keep = 2): string {
+  const parts = locator.split(' > ')
+  return parts.length > keep ? `… > ${parts.slice(-keep).join(' > ')}` : locator
 }

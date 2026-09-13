@@ -54,6 +54,19 @@ const PAD_GRANULARITY = 64
 const COVERAGE_WARN = 0.98
 const ROTATION_REJECT_DEG = 5
 const ROTATION_SUSPECT_DEG = 1
+/** A similarity fit this close to scale 1 and no rotation is snapped to a whole-pixel shift. */
+const SNAP_SCALE = 0.005
+const SNAP_ROTATION_DEG = 0.05
+/** Matches within this many pixels of the dominant shift support it. */
+const SHIFT_TOLERANCE = 1.5
+/** The dominant whole-pixel shift replaces the fit outright when it keeps this share of the fit's inliers. */
+const SHIFT_KEEP = 0.6
+/** Otherwise it still wins over a non-uniform or near-unit fit when it explains this share of all matches. */
+const SHIFT_MIN_FRACTION = 0.2
+/** A uniform fit this far from scale 1 is a real zoom, which a shift must not override. */
+const ZOOM_MIN = 0.03
+/** Below this spread the fit's inliers cover too little of the page to trust it over a page-wide shift. */
+const LOW_SPREAD = 0.2
 
 interface Features {
   kps: KeyPointVector
@@ -182,6 +195,47 @@ export function fitSimilarity(pairs: Pair[], allowRotation: boolean): Mat3 {
   return [a, -b, tx, b, a, ty, 0, 0, 1]
 }
 
+/** Side of the grid cells that measure how much of the page a shift's supporters cover. */
+const SHIFT_CELL = 64
+/** How many of the most voted shifts are compared by coverage. */
+const SHIFT_CANDIDATES = 12
+
+/**
+ * The whole-pixel shift that explains the widest spread of matches. Raw
+ * votes would hand the page to whatever is most textured (an illustration
+ * that moved gathers hundreds of matches); counting the grid cells the
+ * supporters cover instead favours the shift that holds across the page,
+ * which is the page's own shift. The result is refined to the median of its
+ * supporters.
+ */
+function dominantShift(pairs: Pair[]): { dx: number; dy: number; count: number } | null {
+  const bins = new Map<string, number>()
+  for (const p of pairs) {
+    const key = `${Math.round(p.bx - p.cx)},${Math.round(p.by - p.cy)}`
+    bins.set(key, (bins.get(key) ?? 0) + 1)
+  }
+  // The identity is always a candidate: a page whose parts moved in different
+  // directions has no dominant shift, and staying put lets the structural
+  // alignment sort the parts out.
+  const top = [...bins.entries()].sort((a, b) => b[1] - a[1]).slice(0, SHIFT_CANDIDATES)
+  if (!top.some(([key]) => key === '0,0')) top.push(['0,0', bins.get('0,0') ?? 0])
+  let best: { dx: number; dy: number; count: number; cells: number } | null = null
+  for (const [key] of top) {
+    const [bx, by] = key.split(',').map(Number) as [number, number]
+    const near = pairs.filter((p) => Math.abs(p.bx - p.cx - bx) <= SHIFT_TOLERANCE && Math.abs(p.by - p.cy - by) <= SHIFT_TOLERANCE)
+    if (!near.length) continue
+    const cells = new Set(near.map((p) => `${Math.floor(p.bx / SHIFT_CELL)},${Math.floor(p.by / SHIFT_CELL)}`)).size
+    if (!best || cells > best.cells || (cells === best.cells && near.length > best.count)) {
+      const median = (values: number[]): number => {
+        const sorted = [...values].sort((a, b) => a - b)
+        return sorted[Math.floor(sorted.length / 2)]!
+      }
+      best = { dx: Math.round(median(near.map((p) => p.bx - p.cx))), dy: Math.round(median(near.map((p) => p.by - p.cy))), count: near.length, cells }
+    }
+  }
+  return best ? { dx: best.dx, dy: best.dy, count: best.count } : null
+}
+
 function reprojectionRms(pairs: Pair[], m: Mat3): number {
   if (pairs.length === 0) return 0
   let sum = 0
@@ -230,8 +284,35 @@ function featureEstimate(ctx: StageContext, input: PreprocessOutput, chain: Alig
     return null
   }
 
+  const finish = (m: Mat3, kind: TransformKind, method: AlignMethod, inlierPairs: Pair[]): Estimate => {
+    const inliers = inlierPairs.length
+    const inlierRatio = inliers / pairs.length
+    const rms = reprojectionRms(inlierPairs, m)
+    const spread = spreadOf(inlierPairs, B.width, B.height)
+    if (spread < 0.4) {
+      ctx.warn('ALIGN_LOW_SPREAD', 'the matched features cover only a small part of the page; the alignment may not hold everywhere', { spread })
+    }
+    chain[chain.length - 1] = method
+    return { transform: m, kind, method, keypoints, matches: pairs.length, inliers, inlierRatio, spread, rms, confidence: alignmentConfidence(inliers, inlierRatio, spread, rms) }
+  }
+
+  // Same-size captures cannot zoom. When one whole-pixel shift explains a
+  // good share of the matches it is taken exactly: it beats a least-squares
+  // fit that compromises between parts of the page that moved differently,
+  // and it rescues pages where RANSAC finds no single transform at all.
+  const sameSize = B.scale === C.scale && B.width === C.width
+  const shift = sameSize && !wantHomography ? dominantShift(pairs) : null
+  const strongShift = shift !== null && shift.count >= f.minInliers && shift.count >= SHIFT_MIN_FRACTION * pairs.length
+  const shiftEstimate = (): Estimate => {
+    const m = translation(shift!.dx, shift!.dy)
+    const supporters = pairs.filter((p) => Math.abs(p.bx - p.cx - shift!.dx) <= SHIFT_TOLERANCE && Math.abs(p.by - p.cy - shift!.dy) <= SHIFT_TOLERANCE)
+    return finish(m, transformKindOf(m, 1e-4), 'features-similarity', supporters)
+  }
+  const debug = (globalThis as { ELASTISHOT_DEBUG?: (...args: unknown[]) => void }).ELASTISHOT_DEBUG
+
   const fit = ransac(ctx, pairs, wantHomography)
   if (!fit) {
+    if (strongShift) return shiftEstimate()
     ctx.warn('ALIGN_FEW_INLIERS', 'RANSAC found no consistent transform', { matches: pairs.length })
     return null
   }
@@ -239,18 +320,21 @@ function featureEstimate(ctx: StageContext, input: PreprocessOutput, chain: Alig
   const inliers = inlierPairs.length
   const inlierRatio = inliers / pairs.length
   if (inliers < f.minInliers || inlierRatio < 0.2) {
+    if (strongShift) return shiftEstimate()
     ctx.warn('ALIGN_FEW_INLIERS', `only ${inliers} of ${pairs.length} matches agree on a transform`, { inliers, matches: pairs.length })
     return null
   }
 
   let m = fit.m
-  let d = decompose(m)
+  const d = decompose(m)
   if (d.scale < SCALE_MIN || d.scale > SCALE_MAX || !Number.isFinite(d.scale)) {
+    if (strongShift) return shiftEstimate()
     ctx.warn('ALIGN_SCALE_OUT_OF_RANGE', `estimated scale ${d.scale.toFixed(3)} is outside ${SCALE_MIN}..${SCALE_MAX}`, { scale: d.scale })
     return null
   }
   const rotation = Math.abs(d.rotationDeg)
   if (rotation >= ROTATION_REJECT_DEG) {
+    if (strongShift) return shiftEstimate()
     ctx.warn('ALIGN_ROTATION_SUSPECT', `estimated rotation ${d.rotationDeg.toFixed(2)} degrees rejected; screenshots do not rotate`, { rotationDeg: d.rotationDeg })
     return null
   }
@@ -258,49 +342,41 @@ function featureEstimate(ctx: StageContext, input: PreprocessOutput, chain: Alig
     ctx.warn('ALIGN_ROTATION_SUSPECT', `estimated rotation ${d.rotationDeg.toFixed(2)} degrees${options.allowRotation ? ' kept' : ' removed'}`, { rotationDeg: d.rotationDeg })
   }
 
-  let kind: TransformKind
-  let method: AlignMethod
+  const aniso = d.scaleY === 0 ? Infinity : Math.abs(d.scaleX / d.scaleY)
+  const uniform = aniso > 0.97 && aniso < 1.03 && Math.abs(d.shear) < 0.03
+  const realZoom = uniform && Math.abs(d.scale - 1) >= ZOOM_MIN
+  // A fit whose inliers sit in one corner (an illustration that moved) says
+  // nothing about the page; a shift supported across the page does.
+  const fitSpread = spreadOf(inlierPairs, B.width, B.height)
+  const shiftSpread = shift ? spreadOf(pairs.filter((p) => Math.abs(p.bx - p.cx - shift.dx) <= SHIFT_TOLERANCE && Math.abs(p.by - p.cy - shift.dy) <= SHIFT_TOLERANCE), B.width, B.height) : 0
+  const wider = fitSpread < LOW_SPREAD && shiftSpread >= 2 * fitSpread
+  const takeShift = shift !== null && shift.count >= f.minInliers && (shift.count >= SHIFT_KEEP * inliers || (strongShift && !realZoom) || (wider && !realZoom))
+  if (debug) debug('globalAlign', { pairs: pairs.length, inliers, fit: { scale: d.scale, scaleX: d.scaleX, scaleY: d.scaleY, shear: d.shear, tx: d.tx, ty: d.ty }, fitSpread, shift, shiftSpread, takeShift })
+  if (takeShift) return shiftEstimate()
+
   if (wantHomography) {
-    kind = d.perspective > 1e-3 ? 'homography' : transformKindOf(m)
-    method = 'features-homography'
-  } else {
-    const aniso = d.scaleY === 0 ? Infinity : Math.abs(d.scaleX / d.scaleY)
-    const uniform = aniso > 0.97 && aniso < 1.03 && Math.abs(d.shear) < 0.03
-    if (options.alignMode === 'similarity' || (options.alignMode === 'auto' && uniform)) {
-      m = fitSimilarity(inlierPairs, options.allowRotation)
-      kind = transformKindOf(m, 1e-4)
-      method = 'features-similarity'
-    } else {
-      if (aniso < 0.4 || aniso > 2.5 || Math.abs(d.shear) > 0.1) {
-        ctx.warn('ALIGN_ANISOTROPIC', `candidate is stretched unevenly (x ${d.scaleX.toFixed(3)}, y ${d.scaleY.toFixed(3)}, shear ${d.shear.toFixed(3)})`, {
-          scaleX: d.scaleX,
-          scaleY: d.scaleY,
-          shear: d.shear,
-        })
-      }
-      kind = 'affine'
-      method = 'features-affine'
+    return finish(m, d.perspective > 1e-3 ? 'homography' : transformKindOf(m), 'features-homography', inlierPairs)
+  }
+  if (options.alignMode === 'similarity' || (options.alignMode === 'auto' && uniform)) {
+    m = fitSimilarity(inlierPairs, options.allowRotation)
+    // Screenshots of the same page at the same size differ by whole pixels;
+    // an estimate within a hair of that is measurement noise. Snapping to
+    // the integer shift keeps the warp exact, so the pixel diff needs no
+    // antialiasing tolerance and small text changes stay visible.
+    const sd = decompose(m)
+    if (Math.abs(sd.scale - 1) < SNAP_SCALE && Math.abs(sd.rotationDeg) < SNAP_ROTATION_DEG) {
+      m = translation(Math.round(sd.tx), Math.round(sd.ty))
     }
+    return finish(m, transformKindOf(m, 1e-4), 'features-similarity', inlierPairs)
   }
-  d = decompose(m)
-  const rms = reprojectionRms(inlierPairs, m)
-  const spread = spreadOf(inlierPairs, B.width, B.height)
-  if (spread < 0.4) {
-    ctx.warn('ALIGN_LOW_SPREAD', 'the matched features cover only a small part of the page; the alignment may not hold everywhere', { spread })
+  if (aniso < 0.4 || aniso > 2.5 || Math.abs(d.shear) > 0.1) {
+    ctx.warn('ALIGN_ANISOTROPIC', `candidate is stretched unevenly (x ${d.scaleX.toFixed(3)}, y ${d.scaleY.toFixed(3)}, shear ${d.shear.toFixed(3)})`, {
+      scaleX: d.scaleX,
+      scaleY: d.scaleY,
+      shear: d.shear,
+    })
   }
-  chain[chain.length - 1] = method
-  return {
-    transform: m,
-    kind,
-    method,
-    keypoints,
-    matches: pairs.length,
-    inliers,
-    inlierRatio,
-    spread,
-    rms,
-    confidence: alignmentConfidence(inliers, inlierRatio, spread, rms),
-  }
+  return finish(m, 'affine', 'features-affine', inlierPairs)
 }
 
 function projectionEstimate(ctx: StageContext, input: PreprocessOutput, chain: AlignMethod[]): Estimate | null {

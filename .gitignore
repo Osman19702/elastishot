@@ -6,3 +6,6 @@ test-results/
 *.tgz
 .DS_Store
 Thumbs.db
+examples/ui-lab/dist/
+examples/ui-lab/report/
+site/dist/

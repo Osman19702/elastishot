@@ -28,3 +28,8 @@ Feature: A — Comparing two images or two pages
     When I compare the URL of version 1 with the URL of version 2 of a page
     Then the command exits with 1
     And the report names the collapsed FAQ, the zoomed illustration, the renamed button and the new badge
+
+  Scenario: A5 — A one-digit change in small text is reported
+    When I compare a page image with the same image where one glyph of one-pixel strokes changed
+    Then the command exits with 1
+    And exactly one changed region is reported, on the glyph

@@ -31,7 +31,7 @@ export interface ResolvedCompareOptions {
 }
 
 export const DEFAULT_COMPARE_OPTIONS: Readonly<ResolvedCompareOptions> = Object.freeze({
-  workingWidth: 1024,
+  workingWidth: 1280,
   alignMode: 'auto' as AlignMode,
   allowRotation: false,
   features: { detector: 'orb' as const, nFeatures: 2000, ratio: 0.75, ransacThreshold: 3, minInliers: 12 },
@@ -47,7 +47,7 @@ export const DEFAULT_COMPARE_OPTIONS: Readonly<ResolvedCompareOptions> = Object.
   diff: {
     method: 'yiq' as const,
     threshold: 0.1,
-    antialiasTolerance: 1,
+    antialiasTolerance: 'auto' as const,
     mergeGapPx: 12,
     minRegionAreaPx: 24,
     maxRegions: 500,
@@ -150,7 +150,7 @@ function validate(o: ResolvedCompareOptions): void {
   unit('structural.matchThreshold', o.structural.matchThreshold)
   oneOf('diff.method', o.diff.method, ['yiq', 'gray', 'ssim'] as const)
   unit('diff.threshold', o.diff.threshold)
-  nonNegative('diff.antialiasTolerance', o.diff.antialiasTolerance)
+  if (o.diff.antialiasTolerance !== 'auto') nonNegative('diff.antialiasTolerance', o.diff.antialiasTolerance)
   nonNegative('diff.mergeGapPx', o.diff.mergeGapPx)
   nonNegative('diff.minRegionAreaPx', o.diff.minRegionAreaPx)
   positiveInt('diff.maxRegions', o.diff.maxRegions)

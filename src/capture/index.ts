@@ -97,12 +97,15 @@ function resolve(o: CaptureOptions): Resolved {
 
 async function captureOnPage(page: Page, target: CaptureTarget, r: Resolved): Promise<Snapshot> {
   const capturedAt = new Date().toISOString()
+  let httpStatus: number | undefined
   try {
-    await page.goto(target.url, { waitUntil: r.waitUntil, timeout: r.timeoutMs })
+    const response = await page.goto(target.url, { waitUntil: r.waitUntil, timeout: r.timeoutMs })
+    httpStatus = response?.status()
   } catch (cause) {
     throw new ElastishotError('E_CAPTURE', `cannot open ${target.url}: ${(cause as Error).message}`, { cause })
   }
   await preparePage(page, r)
+  const title = (await page.title().catch(() => '')).trim()
 
   let collected: CollectResult | null = null
   if (r.elementMap) {
@@ -142,6 +145,8 @@ async function captureOnPage(page: Page, target: CaptureTarget, r: Resolved): Pr
     viewport: { ...viewport, deviceScaleFactor: r.deviceScaleFactor },
     dpr: r.deviceScaleFactor,
     fullPage: r.fullPage,
+    ...(httpStatus !== undefined ? { httpStatus } : {}),
+    ...(title ? { title } : {}),
     ...(target.name ? { target: target.name } : {}),
   })
   return { image, png, elementMap, meta }

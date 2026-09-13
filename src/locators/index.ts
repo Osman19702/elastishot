@@ -29,6 +29,8 @@ export interface LocatorOptions {
   preferStrategies?: LocatorStrategy[]
   /** Also report elements present in both maps whose position moved (default false). */
   mapMoves?: boolean
+  /** Report elements present in both maps whose size changed, as changed with map evidence (default true). */
+  mapResizes?: boolean
   /** Candidate pixels -> baseline pixels, for the map-vs-map move check. */
   transform?: Transform2D
 }
@@ -56,6 +58,8 @@ export interface ChangedLocator {
   score: number
   sideBaseline?: LocatorSide
   sideCandidate?: LocatorSide
+  /** Width and height change in baseline pixels when the element maps show a resize. */
+  sizeDelta?: { w: number; h: number }
 }
 
 export interface RegionLocators {
@@ -88,6 +92,7 @@ const DEFAULTS = {
   moveTolerancePx: 4,
   preferStrategies: ['testid', 'id', 'role', 'css'] as LocatorStrategy[],
   mapMoves: false,
+  mapResizes: true,
 }
 
 const KIND_ORDER: Record<RegionKind, number> = { removed: 0, added: 1, changed: 2, moved: 3 }
@@ -160,13 +165,15 @@ export function mapLocators(regions: readonly DiffRegion[], maps: LocatorMaps, o
     const changes = presenceDiff(baseline, candidate, {
       moveTolerancePx: opts.moveTolerancePx,
       detectMoves: opts.mapMoves,
+      detectResizes: opts.mapResizes,
       ...(options.transform ? { transform: options.transform } : {}),
     })
     for (const change of changes) {
       const entry = change.baseline ?? change.candidate!
       const e = entryFor(change.locator, entry.name, entry.strategy)
-      addKind(e, change.kind)
+      addKind(e, change.kind === 'resized' ? 'changed' : change.kind)
       addEvidence(e, 'map')
+      if (change.sizeDelta) e.sizeDelta = change.sizeDelta
       if (change.baseline) e.sideBaseline ??= { box: change.baseline.box, name: change.baseline.name, tag: change.baseline.tag }
       if (change.candidate) e.sideCandidate ??= { box: change.candidate.box, name: change.candidate.name, tag: change.candidate.tag }
     }

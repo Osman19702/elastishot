@@ -5,7 +5,7 @@ Elastic screenshot comparison for UI change detection. Compare two screenshots, 
 - **Aligns before it compares.** ORB feature matching and RANSAC recover the zoom, shift and stretch between the two images; a band alignment then maps sections that collapsed or expanded. Pixels are only compared where they correspond.
 - **Any two sizes.** 320x320 against 1080x1350 works. The candidate is warped onto the baseline.
 - **Names the change.** A Playwright capture records an element map (test id, id, role and name, or CSS path) next to each screenshot; regions are attributed to the smallest element that covers them.
-- **Reports that travel.** A summary page with one card per pair, a detail page per pair with an embeddable `<elastishot-viewer>` (slider, horizontal slider, flip, blink, overlay, diff), `report.json` and JUnit XML.
+- **Reports that travel.** A summary page with one card per pair, a detail page per pair with an embeddable `<elastishot-viewer>` (slider, flip, blink, overlay, diff), `report.json` and JUnit XML.
 - **Tracks a URL across deployments.** `snapshot` / `run` / `approve` keep a baseline per target and viewport; the CLI exits non-zero when a deployment drifted.
 - **Modular.** Isomorphic core (runs in Node and the browser through opencv.js WASM), Node-only capture and file layers behind subpath exports, plugin hooks and pluggable reporters.
 
@@ -167,9 +167,10 @@ Images are written as files next to the pages, thumbnails are inlined so `index.
 - **"capturing pages needs Playwright"**: `npm install -D playwright && npx playwright install chromium`. Playwright is an optional peer dependency; image-only use does not need it.
 - **Flaky captures**: freeze what moves. `--hide .cookie-banner`, `--wait-for "[data-testid=ready]"`, `capture.mask` in the config; animations and transitions are already disabled during capture.
 - **A full-page capture is wider than the viewport**: the page itself is wider (a fixed-width layout); Playwright captures the scrollable area. Use a viewport at least as wide as the page or accept the width.
-- **Too many small regions**: raise `diff.antialiasTolerance` (default 1 px) or `diff.threshold` (default 0.1) in the config `compare` section, or lower `diff.maxRegions`.
+- **Too many small regions**: raise `diff.threshold` (default 0.1) in the config `compare` section, or lower `diff.maxRegions`. `diff.antialiasTolerance` defaults to `auto`: 1 px when the candidate had to be resampled (zoom, rotation, fallback alignment) and 0 on same-scale pages, so a changed digit in small text is reported. Set it to a number to force one behaviour.
+- **A captured page was an error page**: the pair carries a `CAPTURE_ERROR_PAGE` warning when the response status was 4xx/5xx, the title looks like an error or redirect notice, or fewer than five elements were found. Check the URL, the wait settings and authentication before trusting the score.
 - **Everything below a change is reported**: the structural alignment could not find the shift. Check the `STRUCT_WEAK_MATCH` and `ALIGN_*` warnings in the pair page; long identical lists and pages without texture are the usual causes.
-- **Memory**: opencv.js keeps a few copies of the working images. Full-page captures at device pixel ratio 2 are large; `workingWidth` (default 1024) bounds the analysis size, and `--max-old-space-size` helps Node with the decoded PNGs.
+- **Memory**: opencv.js keeps a few copies of the working images. Full-page captures at device pixel ratio 2 are large; `workingWidth` (default 1280, so a 1280 px viewport is compared pixel for pixel) bounds the analysis size; below it whole-pixel shifts become fractional and the antialiasing tolerance switches on, and `--max-old-space-size` helps Node with the decoded PNGs.
 - **Windows**: paths in reports always use forward slashes; `.elastishot/runs/latest` is a text file, not a symlink.
 
 ## Limits

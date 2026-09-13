@@ -24,7 +24,7 @@ const BLANK_ENERGY = 0.06
 const BLANK_SPREAD = 0.06
 const SIM_GAIN = 1.5
 const BLANK_ROW_ENERGY = 2
-const MIN_BLANK_RUN = 16
+const MIN_BLANK_RUN = 24
 const CONTENT_PAD = 4
 const MIN_COVERAGE = 0.5
 /** Grey levels within this distance of the page background count as background. */
@@ -33,11 +33,21 @@ const BG_TOLERANCE = 4
 const FRAME_PX = 4
 /** Gap parts shorter than this are slivers of a neighbouring edge, not content. */
 const MIN_PART_ROWS = 6
-/** Edge gaps count as crops below this coverage. */
-const CROP_COVERAGE = 0.9
-/** Edge gaps smaller than this share of the baseline height are jitter. */
+/**
+ * Edge gaps count as crops below these coverages. Baseline rows the candidate
+ * does not reach are usually a capture that ended early (a viewport, lazy
+ * content that never loaded), so they are treated as not compared unless the
+ * candidate shows nearly all of the baseline; candidate rows beyond the
+ * baseline's edge are usually content (a banner) unless the baseline shows
+ * clearly less than the candidate.
+ */
+const CROP_COVERAGE_DELETED = 0.95
+const CROP_COVERAGE_INSERTED = 0.9
+/** Edge gaps smaller than this share of the baseline height are jitter, up to CROP_SMALL_MAX rows. */
 const CROP_SMALL_FRACTION = 0.03
 const CROP_MIN_ROWS = 16
+/** A 40 px banner on a 2400 px page is content, not jitter: the share rule stops here. */
+const CROP_SMALL_MAX = 32
 /** Strips this similar are interchangeable when sliding a gap. */
 const SLIDE_SAME = 0.9
 /** How many strips a gap may slide in either direction. */
@@ -50,6 +60,18 @@ const MIN_REFINE_ROWS = 32
 const REFINE_GAIN = 0.9
 /** Sub-sampling step for the refinement's pixel difference. */
 const REFINE_STEP = 2
+/** Below this matched share the strip alignment is checked against the plain global alignment. */
+const WEAK_MATCH = 0.3
+/** Whitespace-only gap parts shorter than this many rows are padding jitter, not content. */
+const SLIVER_ROWS = 16
+/** A row whose mean grey difference is below this is the same row in both images. */
+const EXACT_ROW_MAD = 2
+/** Column blocks the exactness check scores separately, so a half-width change still leaves the other half counting. */
+const EXACT_BLOCKS = 4
+/** A cell whose grey levels spread less than this is blank and does not count as evidence. */
+const CONTENT_SPREAD = 8
+/** The band map is discarded when the plain global alignment pairs this many times more content cells exactly. */
+const EXACT_MARGIN = 1.1
 
 /** Mean absolute grey difference between baseline rows [b0, b0+len) and canvas rows [c0, c0+len), sub-sampled. */
 function bandDifference(a: Uint8Array, b: Uint8Array, width: number, b0: number, c0: number, len: number): number {
@@ -64,6 +86,44 @@ function bandDifference(a: Uint8Array, b: Uint8Array, width: number, b0: number,
     }
   }
   return n ? sum / n : Infinity
+}
+
+/**
+ * Pixel evidence for a band map: the number of (row, column block) cells
+ * with content in the baseline that the map pairs with the same pixels on
+ * the other side. Blank cells are left out because white matches white
+ * under any alignment; blocks keep a hero counting when only its
+ * neighbouring panel changed.
+ */
+function exactContentCells(bands: Band[], grayB: Uint8Array, grayW: Uint8Array, width: number, baselineHeight: number, canvasHeight: number, pad: number): number {
+  const blockW = Math.max(1, Math.floor(width / EXACT_BLOCKS))
+  let cells = 0
+  for (const band of bands) {
+    if (band.kind !== 'matched') continue
+    const y0 = Math.max(0, band.baseline.start)
+    const y1 = Math.min(baselineHeight, band.baseline.end)
+    for (let y = y0; y < y1; y += REFINE_STEP) {
+      const c = y + band.offset + pad
+      if (c < 0 || c >= canvasHeight) continue
+      for (let k = 0; k < EXACT_BLOCKS; k++) {
+        const x0 = k * blockW
+        const x1 = k === EXACT_BLOCKS - 1 ? width : x0 + blockW
+        let lo = 255
+        let hi = 0
+        let sum = 0
+        let n = 0
+        for (let x = x0; x < x1; x += REFINE_STEP) {
+          const v = grayB[y * width + x]!
+          if (v < lo) lo = v
+          if (v > hi) hi = v
+          sum += Math.abs(v - grayW[c * width + x]!)
+          n++
+        }
+        if (n && hi - lo >= CONTENT_SPREAD && sum / n < EXACT_ROW_MAD) cells++
+      }
+    }
+  }
+  return cells
 }
 
 interface Signatures {
@@ -254,8 +314,8 @@ function dropCroppedEdges(ctx: StageContext, bands: Band[], baselineHeight: numb
     if (!band || band.kind === 'matched') return
     const deleted = band.kind === 'deleted'
     const rows = deleted ? band.baseline.end - band.baseline.start : band.candidate.end - band.candidate.start
-    const small = rows < Math.max(CROP_MIN_ROWS, CROP_SMALL_FRACTION * baselineHeight)
-    const partial = deleted ? warped.coverageFraction < CROP_COVERAGE : candidateCovered < CROP_COVERAGE
+    const small = rows < Math.max(CROP_MIN_ROWS, Math.min(CROP_SMALL_MAX, CROP_SMALL_FRACTION * baselineHeight))
+    const partial = deleted ? warped.coverageFraction < CROP_COVERAGE_DELETED : candidateCovered < CROP_COVERAGE_INSERTED
     if (!small && !partial) return
     out.splice(index, 1)
     const where = index === 0 ? 'top' : 'bottom'
@@ -394,6 +454,9 @@ function gapRegions(input: GlobalAlignOutput, bands: Band[], edges: { baseline: 
       const area = box.w * box.h
       const tags = [inserted ? 'inserted-rows' : 'deleted-rows']
       if (whitespace) tags.push('whitespace-only')
+      // A few rows of padding that grew or shrank stay in the band map but are
+      // not worth a region: nobody wants a full-width sliver in the list.
+      if (whitespace && box.h <= SLIVER_ROWS) continue
       out.push({
         kind: inserted ? 'added' : 'removed',
         boxBaseline: inserted ? null : box,
@@ -564,6 +627,23 @@ export const structuralAlignStage: Stage<GlobalAlignOutput, StructuralAlignOutpu
     }
     bands = merged
 
+    // The strip signatures can be fooled (a re-themed panel makes every strip
+    // of a section look new, and free end gaps then let a far-fetched match
+    // win). The pixels decide: when the plain global alignment has more
+    // pixel-exact cells than the band map, the band map is discarded.
+    if (bands.length > 1) {
+      const grayB = B.grayBlur.data
+      const grayW = W.grayBlur.data
+      const aligned = exactContentCells(bands, grayB, grayW, B.width, B.height, W.height, pad)
+      const diagonal = exactContentCells(singleBand(shared), grayB, grayW, B.width, B.height, W.height, pad)
+      const dbg = debugSink()
+      if (dbg) dbg('exactCells', { aligned, diagonal, bands: bands.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}`) })
+      if (diagonal > aligned * EXACT_MARGIN) {
+        ctx.warn('STRUCT_WEAK_MATCH', 'the strip alignment explained fewer pixels than the global alignment and was discarded', { alignedCells: aligned, diagonalCells: diagonal })
+        return finish(singleBand(shared), stripPx, 1)
+      }
+    }
+
     let matchedRows = 0
     let consideredRows = 0
     for (const band of bands) {
@@ -571,9 +651,41 @@ export const structuralAlignStage: Stage<GlobalAlignOutput, StructuralAlignOutpu
       if (band.kind !== 'inserted') consideredRows += band.baseline.end - band.baseline.start
     }
     const matchedFraction = Math.min(1, matchedRows / Math.max(1, consideredRows))
-    if (matchedFraction < 0.2) {
-      ctx.warn('STRUCT_WEAK_MATCH', `only ${Math.round(matchedFraction * 100)}% of the baseline rows found a counterpart in the candidate`, { matchedFraction })
-      if (input.confidence < 0.3) return finish(singleBand(shared), stripPx, matchedFraction)
+    if (matchedFraction < WEAK_MATCH) {
+      // When one block changed its look entirely (a code panel that switched
+      // theme, a redesigned footer) the strip alignment can prefer a tiny
+      // far-fetched match plus free end gaps over the obvious diagonal, and
+      // then reports the whole page as removed. The global alignment already
+      // put the shared content on the diagonal; if that lines up more strips
+      // than the sequence alignment kept, trust it and compare band by band.
+      const overlap = Math.min(nB, cIndex.length)
+      let diagonal = 0
+      for (let i = 0; i < overlap; i++) if (similarity(sigB, bStart + i, sigC, cStart + i) >= st.matchThreshold) diagonal++
+      const diagonalFraction = overlap ? diagonal / overlap : 0
+      // Strip signatures see a hero next to a re-themed code panel as a
+      // different strip; the pixels do not lie. Count the rows that are
+      // the same on the diagonal to the pixel.
+      const y0 = Math.max(0, Math.ceil(W.extent.top))
+      const y1 = Math.min(shared, Math.floor(W.extent.bottom))
+      let exact = 0
+      let considered = 0
+      const grayB = B.grayBlur.data
+      const grayW = W.grayBlur.data
+      for (let y = y0; y < y1; y += REFINE_STEP) {
+        considered++
+        if (bandDifference(grayB, grayW, B.width, y, y + pad, 1) < EXACT_ROW_MAD) exact++
+      }
+      const exactFraction = considered ? exact / considered : 0
+      const percent = Math.round(matchedFraction * 100)
+      if (diagonalFraction > matchedFraction || exactFraction >= matchedFraction || input.confidence < 0.3) {
+        ctx.warn('STRUCT_WEAK_MATCH', `only ${percent}% of the baseline rows found a counterpart in the candidate; compared on the global alignment instead`, {
+          matchedFraction,
+          diagonalFraction,
+          exactFraction,
+        })
+        return finish(singleBand(shared), stripPx, Math.max(matchedFraction, diagonalFraction, exactFraction))
+      }
+      ctx.warn('STRUCT_WEAK_MATCH', `only ${percent}% of the baseline rows found a counterpart in the candidate`, { matchedFraction, diagonalFraction, exactFraction })
     }
     return finish(bands, stripPx, matchedFraction)
   },

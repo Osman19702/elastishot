@@ -36,14 +36,16 @@ export interface CollectResult {
 }
 
 function collectMain(opts: CollectOptions): CollectResult {
-  const SKIP = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'HEAD', 'TITLE', 'BR', 'WBR', 'SVG', 'PATH'])
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'HEAD', 'TITLE', 'BR', 'WBR'])
   const doc = document
   const all: Element[] = []
+  // An inline <svg> is one element (an icon, a logo); its paths are not.
   const walk = (node: Element): void => {
     for (const child of Array.from(node.children)) {
-      if (SKIP.has(child.tagName.toUpperCase())) continue
+      const tag = child.tagName.toUpperCase()
+      if (SKIP.has(tag)) continue
       all.push(child)
-      walk(child)
+      if (tag !== 'SVG') walk(child)
     }
   }
   walk(doc.body)

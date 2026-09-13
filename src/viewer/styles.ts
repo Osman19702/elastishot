@@ -27,15 +27,13 @@ export const VIEWER_CSS = `
 .region.k-moved { --_c: var(--es-region-moved, #2563eb); }
 .handle { position: absolute; display: none; z-index: 2; }
 .handle.v { top: 0; bottom: 0; width: 0; border-left: 2px solid var(--es-handle, #fff); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); cursor: ew-resize; }
-.handle.h { left: 0; right: 0; height: 0; border-top: 2px solid var(--es-handle, #fff); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); cursor: ns-resize; }
 .handle::after { content: ''; position: absolute; top: 50%; left: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-radius: 50%; background: var(--es-handle, #fff); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); }
 .handle.v::after { margin-left: -15px; }
-.handle.h::after { margin-top: -15px; }
 .handle:focus-visible { outline: 2px solid var(--_accent); }
 .chip { position: absolute; left: 8px; bottom: 8px; z-index: 3; background: var(--es-chip-bg, rgba(17, 24, 39, 0.92)); color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 12px; max-width: calc(100% - 16px); display: none; pointer-events: none; }
 .chip code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .chip.on { display: block; }
-:host([mode="slider"]) .layer.candidate, :host([mode="slider-h"]) .layer.candidate, :host([mode="flip"]) .layer.candidate, :host([mode="blink"]) .layer.candidate, :host([mode="overlay"]) .layer.candidate { display: block; }
-:host([mode="slider"]) .handle.v, :host([mode="slider-h"]) .handle.h { display: block; }
+:host([mode="slider"]) .layer.candidate, :host([mode="flip"]) .layer.candidate, :host([mode="blink"]) .layer.candidate, :host([mode="overlay"]) .layer.candidate { display: block; }
+:host([mode="slider"]) .handle.v { display: block; }
 :host([mode="diff"]) .diff-tint { display: block; }
 `

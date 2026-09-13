@@ -1,9 +1,8 @@
-export const MODES = ['slider', 'slider-h', 'flip', 'blink', 'overlay', 'diff'] as const
+export const MODES = ['slider', 'flip', 'blink', 'overlay', 'diff'] as const
 export type ViewerMode = (typeof MODES)[number]
 
 const MODE_LABELS: Record<ViewerMode, string> = {
   slider: 'Slider',
-  'slider-h': 'Slider (horizontal)',
   flip: 'Flip',
   blink: 'Blink',
   overlay: 'Overlay',
@@ -26,7 +25,6 @@ ${buttons}
 <div class="regions" role="list" aria-label="changed regions"></div>
 </div>
 <div class="handle v" part="handle" role="slider" tabindex="0" aria-label="Reveal candidate" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>
-<div class="handle h" part="handle" role="slider" tabindex="0" aria-label="Reveal candidate" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>
 <div class="chip" part="chip" aria-live="polite"></div>
 </div>`
 }

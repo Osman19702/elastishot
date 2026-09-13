@@ -4,6 +4,7 @@
  * isomorphic; file and browser handling live in elastishot/node.
  */
 import { loadEngine, type Engine } from './core/engine-seam.ts'
+import { checkSnapshot } from './core/snapshot-check.ts'
 import { evaluate } from './core/thresholds.ts'
 import type { CompareOptions, CompareResult, ElementMap, RasterImage, RegionKind, Snapshot, SnapshotMeta } from './core/types.ts'
 import { mapLocators, type LocatorOptions, type LocatorReport } from './locators/index.ts'
@@ -42,6 +43,8 @@ export async function comparePair(baseline: PairSide, candidate: PairSide, optio
   if (options.failOn !== undefined) thresholds.failOn = options.failOn === 'none' ? [] : options.failOn
   if (options.minRegionScore !== undefined) thresholds.minRegionScore = options.minRegionScore
   const result = await engine.compare(baseline.image, candidate.image, { ...options.compare, thresholds })
+  // A captured error page compares like any other page; say so before anyone trusts the score.
+  result.summary.warnings.push(...checkSnapshot('baseline', baseline), ...checkSnapshot('candidate', candidate))
   const locators = mapLocators(
     result.regions,
     { baseline: baseline.elementMap ?? null, candidate: candidate.elementMap ?? null },

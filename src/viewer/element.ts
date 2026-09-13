@@ -2,7 +2,7 @@
  * <elastishot-viewer>: compare two images in place.
  *
  * Attributes: baseline-src, candidate-src, diff-src, warped-src, mode
- * (slider | slider-h | flip | blink | overlay | diff), position (0-100),
+ * (slider | flip | blink | overlay | diff), position (0-100),
  * opacity (0-1), flip-side (baseline | candidate), blink-ms, zoom (fit | number),
  * show-regions, no-toolbar. Properties: regions, locators, alignment.
  * A light-DOM <script type="application/json"> child may carry
@@ -56,7 +56,6 @@ export class ElastishotViewer extends HTMLElement {
   #diffUrl: string | null = null
   readonly #regionsEl: HTMLElement
   readonly #handleV: HTMLElement
-  readonly #handleH: HTMLElement
   readonly #chip: HTMLElement
   readonly #opacityLabel: HTMLElement
   readonly #opacityInput: HTMLInputElement
@@ -78,7 +77,6 @@ export class ElastishotViewer extends HTMLElement {
     this.#tint = q('.diff-tint')
     this.#regionsEl = q('.regions')
     this.#handleV = q('.handle.v')
-    this.#handleH = q('.handle.h')
     this.#chip = q('.chip')
     this.#opacityLabel = q('label.opacity')
     this.#opacityInput = q('label.opacity input')
@@ -100,16 +98,14 @@ export class ElastishotViewer extends HTMLElement {
     }
     this.#opacityInput.addEventListener('input', () => this.setAttribute('opacity', String(Number(this.#opacityInput.value) / 100)))
     this.#pauseButton.addEventListener('click', () => this.#setBlinkPaused(!this.#blinkPaused))
-    for (const h of [this.#handleV, this.#handleH]) {
-      h.addEventListener('keydown', (e) => this.#handleKey(e))
-      h.addEventListener('pointerdown', (e) => this.#startDrag(e))
-    }
+    this.#handleV.addEventListener('keydown', (e) => this.#handleKey(e))
+    this.#handleV.addEventListener('pointerdown', (e) => this.#startDrag(e))
     this.#viewport.addEventListener('pointerdown', (e) => {
       // Clicks on regions and the handle have their own handlers; a drag from
       // there would move the handle under the pointer and swallow the click.
       const target = e.target as Element | null
       if (target?.closest('.region, .handle, .chip')) return
-      if (this.mode === 'slider' || this.mode === 'slider-h') this.#startDrag(e)
+      if (this.mode === 'slider') this.#startDrag(e)
     })
     this.#viewport.addEventListener('keydown', (e) => this.#viewportKey(e))
   }
@@ -360,13 +356,10 @@ export class ElastishotViewer extends HTMLElement {
     if (this.mode === 'slider') {
       this.#candidateLayer.style.clipPath = `inset(0 0 0 ${p}%)`
       this.#handleV.style.left = `${p}%`
-    } else if (this.mode === 'slider-h') {
-      this.#candidateLayer.style.clipPath = `inset(${p}% 0 0 0)`
-      this.#handleH.style.top = `${p}%`
     } else {
       this.#candidateLayer.style.clipPath = 'none'
     }
-    for (const hnd of [this.#handleV, this.#handleH]) hnd.setAttribute('aria-valuenow', String(p))
+    this.#handleV.setAttribute('aria-valuenow', String(p))
   }
 
   #applyMode(): void {
@@ -420,10 +413,9 @@ export class ElastishotViewer extends HTMLElement {
 
   #startDrag(e: PointerEvent): void {
     if (e.button !== 0) return
-    const horizontal = this.mode === 'slider-h'
     const move = (ev: PointerEvent) => {
       const rect = this.#viewport.getBoundingClientRect()
-      const p = horizontal ? ((ev.clientY - rect.top) / rect.height) * 100 : ((ev.clientX - rect.left) / rect.width) * 100
+      const p = ((ev.clientX - rect.left) / rect.width) * 100
       this.position = p
     }
     const up = () => {
