@@ -4,9 +4,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Minor and patch bumps arrive as one weekly pull request; a major bump
+    # (opencv.js, TypeScript, Playwright) gets its own, because it needs the
+    # engine regression run, not just green checks.
     groups:
       dependencies:
         patterns: ['*']
+        update-types: ['minor', 'patch']
   - package-ecosystem: github-actions
     directory: /
     schedule:
