@@ -28,10 +28,20 @@ const run = (args, cwd) =>
 const problems = []
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'elastishot-pack-'))
-const packed = JSON.parse(run(['pack', '--json', '--pack-destination', tmp], root))[0]
-const files = packed.files.map((f) => f.path)
-const tarball = path.join(tmp, packed.filename)
-console.log(`${packed.filename}: ${files.length} files, ${(packed.size / 1024).toFixed(0)} kB packed`)
+run(['pack', '--pack-destination', tmp], root)
+// The tarball's own listing, not npm's --json report, whose shape has moved
+// between npm majors; tar ships with every OS this runs on.
+const tarball = path.join(tmp, `${pkg.name}-${pkg.version}.tgz`)
+if (!fs.existsSync(tarball)) {
+  console.error(`npm pack did not produce ${tarball}`)
+  process.exit(1)
+}
+// A relative name inside the temp folder: GNU tar reads "C:\..." as host:file.
+const files = execFileSync('tar', ['-tzf', path.basename(tarball)], { cwd: tmp, encoding: 'utf8' })
+  .split(/\r?\n/)
+  .filter(Boolean)
+  .map((f) => f.replace(/^package\//, ''))
+console.log(`${path.basename(tarball)}: ${files.length} files, ${(fs.statSync(tarball).size / 1024).toFixed(0)} kB packed`)
 
 for (const must of ['bin/elastishot.js', 'dist/index.js', 'dist/cli/main.js', 'dist/viewer/elastishot-viewer.js', 'dist/engine/index.js', 'LICENSE', 'NOTICE', 'README.md', 'CHANGELOG.md', 'package.json']) {
   if (!files.includes(must)) problems.push(`missing from the tarball: ${must}`)
