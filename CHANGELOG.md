@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-14
+
 ### Changed
 
 - NOTICE reproduces pixelmatch's ISC licence text for the ported colour
@@ -42,5 +44,6 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Osman19702/elastishot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Osman19702/elastishot/releases/tag/v0.1.0
