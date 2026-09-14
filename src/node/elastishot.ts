@@ -56,6 +56,9 @@ export interface RunCallOptions {
   targets?: string[]
   /** Write missing baselines instead of reporting them as new. */
   update?: boolean
+  /** Minimum similarity to pass; overrides the config for this run. */
+  threshold?: number
+  failOn?: RegionKind[] | 'none'
   out?: string
   runId?: string
   images?: 'files' | 'inline'
@@ -198,7 +201,7 @@ class ElastishotImpl implements Elastishot {
     const runDir = path.resolve(this.config.rootDir, o.out ?? path.join(this.config.outDir, runId))
     const pairs: PairReport[] = []
     for (const t of targets) pairs.push(await this.#runTarget(runDir, t, o))
-    return this.#finish(pairs, runDir, runId, o.junit, o.update ?? false)
+    return this.#finish(pairs, runDir, runId, o.junit, o.update ?? false, o.failOn)
   }
 
   async #runTarget(runDir: string, t: ResolvedTarget, o: RunCallOptions): Promise<PairReport> {
@@ -228,7 +231,7 @@ class ElastishotImpl implements Elastishot {
       )
     }
     const baseline = await resolveInput(dir)
-    return this.#comparePair(runDir, meta, baseline, candidate, t.compare, { threshold: this.config.threshold, failOn: this.config.failOn }, started, o.images ?? this.config.report.images)
+    return this.#comparePair(runDir, meta, baseline, candidate, t.compare, { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn }, started, o.images ?? this.config.report.images)
   }
 
   async #errorPair(runDir: string, meta: { id: string; name: string; target?: string; viewport?: ViewportConfig }, baseline: ResolvedSide | null, candidate: ResolvedSide | null, message: string, started: number, source: string): Promise<PairReport> {

@@ -39,3 +39,16 @@ export {
   type Engine,
   type EngineLoadOptions,
 } from './core/engine-seam.ts'
+export {
+  comparePair,
+  type CapturedHook,
+  type ComparedHook,
+  type ComparePairOptions,
+  type PairOutcome,
+  type PairSide,
+  type Plugin,
+  type Reporter,
+  type ReporterContext,
+  type ReporterOutput,
+  type ReportedHook,
+} from './pipeline.ts'

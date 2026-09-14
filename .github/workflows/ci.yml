@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [master]
@@ -23,6 +26,7 @@ jobs:
       - run: npm test
       - run: npm run test:engine
       - run: npm run build
+      - run: npm run check:package
       - run: npm run test:browser
       - run: npm run test:acceptance
       - run: npm run test:trace

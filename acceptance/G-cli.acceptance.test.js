@@ -8,7 +8,10 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
 
+import { writeFile } from 'node:fs/promises'
+
 import { elastishot, image, workspace } from './support/cli.js'
+import { startSite } from './support/site.js'
 
 let ws
 before(async () => {
@@ -58,4 +61,23 @@ test('G5 — --help and --version exit 0', async () => {
   const version = await cli(['--version'])
   assert.equal(version.code, 0)
   assert.match(version.stdout.trim(), /^\d+\.\d+\.\d+/)
+})
+
+test('G6 — run honours --threshold and --fail-on', async () => {
+  const site = await startSite()
+  try {
+    const config = (url) => writeFile(path.join(ws.dir, 'elastishot.config.json'), JSON.stringify({ capture: { fullPage: true }, targets: [{ name: 'home', url }] }))
+    await config(site.v1)
+    const approved = await cli(['run', '--update'])
+    assert.equal(approved.code, 0, approved.stderr)
+    await config(site.v2)
+    const lenient = await cli(['run', '--threshold', '0.5', '--fail-on', 'none'])
+    assert.equal(lenient.code, 0, lenient.stderr)
+    assert.match(lenient.lines[0], /^PASS home \[desktop\]/)
+    const strict = await cli(['run'])
+    assert.equal(strict.code, 1, strict.stderr)
+    assert.match(strict.lines[0], /^FAIL home \[desktop\]/)
+  } finally {
+    await site.close()
+  }
 })

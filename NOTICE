@@ -1,0 +1,24 @@
+Elastishot
+Copyright (c) 2026 Osman Turalioglu
+
+Licensed under the MIT License; see LICENSE.
+
+This package bundles or depends on the following third-party software:
+
+@techstark/opencv-js (https://github.com/TechStark/opencv-js)
+  A WebAssembly build of OpenCV (https://opencv.org).
+  Licensed under the Apache License, Version 2.0.
+  Copyright (c) the OpenCV contributors and TechStark.
+
+playwright (https://playwright.dev), optional peer dependency used for page captures.
+  Licensed under the Apache License, Version 2.0.
+  Copyright (c) Microsoft Corporation.
+
+pngjs (https://github.com/pngjs/pngjs) — MIT License.
+jpeg-js (https://github.com/jpeg-js/jpeg-js) — BSD-3-Clause License.
+
+The perceptual colour distance in src/engine/pure/yiq.ts follows the YIQ
+formula used by pixelmatch (https://github.com/mapbox/pixelmatch), ISC
+License, Copyright (c) 2019 Mapbox, which in turn implements
+"Measuring perceived color difference using YIQ NTSC transmission color space
+in mobile applications" by Y. Kotsarenko and F. Ramos.

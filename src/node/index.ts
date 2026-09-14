@@ -38,3 +38,27 @@ export {
   type SnapshotFileNames,
 } from './baselines.ts'
 export { ELASTISHOT_VERSION } from './version.ts'
+export {
+  createElastishot,
+  type ApproveCallOptions,
+  type CompareCallOptions,
+  type Elastishot,
+  type ElastishotOptions,
+  type RunCallOptions,
+  type RunResult,
+  type SnapshotCallOptions,
+} from './elastishot.ts'
+export {
+  CONFIG_FILES,
+  DEFAULT_VIEWPORTS,
+  loadConfig,
+  resolveConfig,
+  resolveTargets,
+  validateConfig,
+  type ElastishotConfig,
+  type ReportConfigOptions,
+  type ResolvedConfig,
+  type ResolvedTarget,
+  type TargetConfig,
+  type ViewportConfig,
+} from './config.ts'

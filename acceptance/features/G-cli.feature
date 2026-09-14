@@ -24,3 +24,9 @@ Feature: G — Behaving well in a pipeline
   Scenario: G5 — --help and --version exit 0
     When I run --help and --version
     Then both exit with 0
+
+  Scenario: G6 — run honours --threshold and --fail-on
+    Given a target whose baseline is version 1 of a page
+    When I run against version 2 with --threshold 0.5 --fail-on none
+    Then the command exits with 0
+    And the same run without the flags exits with 1

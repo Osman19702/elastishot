@@ -1,0 +1,57 @@
+name: Release
+
+# Pushing a tag v<version> publishes that version to npm with provenance and
+# creates the GitHub release. The tag must match package.json and the
+# version must not exist on npm yet; everything else is the normal test run.
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Tag matches package.json and is new on npm
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then echo "tag v$TAG but package.json says $PKG"; exit 1; fi
+          if npm view "elastishot@$PKG" version >/dev/null 2>&1; then echo "elastishot@$PKG is already on npm"; exit 1; fi
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:all
+      - run: npm run check:package
+
+      - name: Pack and checksum
+        run: |
+          npm pack
+          sha256sum elastishot-*.tgz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Release notes from the changelog
+        run: node scripts/changelog-section.mjs "${GITHUB_REF_NAME#v}" > RELEASE_NOTES.md
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" elastishot-*.tgz SHA256SUMS --title "Elastishot $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md

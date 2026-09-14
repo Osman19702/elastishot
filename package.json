@@ -2,8 +2,30 @@
   "name": "elastishot",
   "version": "0.1.0",
   "description": "Elastic screenshot comparison for UI change detection: align two screenshots or URLs with feature analysis, then report the regions and DOM locators that changed.",
-  "keywords": ["visual-regression", "screenshot", "diff", "image-comparison", "playwright", "opencv", "qa", "ui-testing"],
+  "author": "Osman Turalioglu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Osman19702/elastishot.git"
+  },
+  "homepage": "https://github.com/Osman19702/elastishot#readme",
+  "bugs": {
+    "url": "https://github.com/Osman19702/elastishot/issues"
+  },
+  "keywords": [
+    "visual-regression",
+    "screenshot",
+    "diff",
+    "image-comparison",
+    "playwright",
+    "opencv",
+    "qa",
+    "ui-testing"
+  ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -19,7 +41,9 @@
     "dist",
     "!dist/**/*.test.*",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -56,12 +80,15 @@
     "./package.json": "./package.json"
   },
   "sideEffects": [
-    "./dist/viewer/elastishot-viewer.js"
+    "./dist/viewer/elastishot-viewer.js",
+    "./dist/viewer/index.js"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build:viewer": "node scripts/build-viewer.mjs",
     "build": "npm run build:viewer && tsc -p tsconfig.build.json",
+    "check:package": "node scripts/check-package.mjs",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run check:package",
     "test": "node --test \"src/**/*.test.ts\"",
     "test:engine": "node --test \"test/engine/*.test.ts\"",
     "test:browser": "node --test \"test/capture/*.test.ts\" \"test/viewer/*.test.ts\" \"test/cli/*.test.ts\"",
@@ -78,7 +105,7 @@
     "pngjs": "^7.0.0"
   },
   "peerDependencies": {
-    "playwright": "^1.63.0"
+    "playwright": ">=1.40"
   },
   "peerDependenciesMeta": {
     "playwright": {
