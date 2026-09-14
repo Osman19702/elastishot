@@ -32,12 +32,26 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
 
-      - name: Tag matches package.json and is new on npm
+      - name: Tag matches package.json; is the version already on npm?
+        id: guard
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').version")"
           if [ "$TAG" != "$PKG" ]; then echo "tag v$TAG but package.json says $PKG"; exit 1; fi
-          if npm view "elastishot@$PKG" version >/dev/null 2>&1; then echo "elastishot@$PKG is already on npm"; exit 1; fi
+          if npm view "elastishot@$PKG" version >/dev/null 2>&1; then
+            echo "elastishot@$PKG is already on npm; the publish step is skipped"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; the release step is skipped"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: npm with trusted-publishing support
         run: npm install -g npm@latest && npm --version
@@ -54,12 +68,15 @@ jobs:
           cat SHA256SUMS
 
       - name: Publish to npm with provenance
+        if: steps.guard.outputs.publish == 'true'
         run: npm publish --provenance --access public
 
       - name: Release notes from the changelog
+        if: steps.guard.outputs.release == 'true'
         run: node scripts/changelog-section.mjs "${GITHUB_REF_NAME#v}" > RELEASE_NOTES.md
 
       - name: GitHub release
+        if: steps.guard.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" elastishot-*.tgz SHA256SUMS --title "Elastishot $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
