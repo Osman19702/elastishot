@@ -24,6 +24,8 @@ fs.rmSync(OUT, { recursive: true, force: true })
 fs.mkdirSync(path.join(OUT, 'demo'), { recursive: true })
 fs.mkdirSync(path.join(OUT, 'video'), { recursive: true })
 fs.copyFileSync(path.join(repo, 'dist', 'viewer', 'elastishot-viewer.js'), path.join(OUT, 'viewer.js'))
+fs.mkdirSync(path.join(OUT, 'fonts'), { recursive: true })
+for (const f of fs.readdirSync(path.join(here, 'fonts'))) fs.copyFileSync(path.join(here, 'fonts', f), path.join(OUT, 'fonts', f))
 
 const jsonForScript = (v) => JSON.stringify(v).replace(/<\//g, '<\\/').replace(/<!--/g, '<\\!--')
 
