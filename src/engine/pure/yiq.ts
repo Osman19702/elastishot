@@ -2,6 +2,10 @@
  * pixelmatch's perceptual colour distance (YIQ space, Kotsarenko & Ramos).
  * Pure JS over RGBA byte arrays so the same code runs on Mat data and on
  * plain images.
+ *
+ * colorDelta and its helpers are ported from pixelmatch, Copyright (c) 2019
+ * Mapbox, ISC License; the notice is reproduced in the NOTICE file. The
+ * neighbourhood and blend tolerance below it is Elastishot's own.
  */
 
 export const YIQ_MAX_DELTA = 35215

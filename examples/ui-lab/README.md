@@ -1,7 +1,8 @@
 # Lumen UI lab
 
 A localhost test bed for Elastishot. `site.mjs` renders "Lumen", a small
-product page, in seven builds:
+product page for a fictional product (any resemblance to a real company or
+product is accidental), in seven builds:
 
 | Build | Scenario | What changes |
 |---|---|---|

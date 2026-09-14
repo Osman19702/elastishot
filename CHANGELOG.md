@@ -6,6 +6,12 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- NOTICE reproduces pixelmatch's ISC licence text for the ported colour
+  distance in `src/engine/pure/yiq.ts`; the file header says so too.
+- The UI lab's "Lumen" page is labelled as a fictional product.
+
 ## [0.1.0] - 2026-09-14
 
 First public release.

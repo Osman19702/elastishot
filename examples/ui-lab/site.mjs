@@ -251,7 +251,7 @@ ${shifts ? pricing + '\n' + featuresSection : featuresSection + '\n' + pricing}
 ${faq}
 ${changelog}
 </main>
-<footer class="footer"><span>© 2026 Lumen Analytics Ltd</span><nav aria-label="Footer"><a href="#">Privacy</a><a href="#">Terms</a><a href="#">Status</a></nav></footer>
+<footer class="footer"><span>© 2026 Lumen, a fictional product for this lab</span><nav aria-label="Footer"><a href="#">Privacy</a><a href="#">Terms</a><a href="#">Status</a></nav></footer>
 </body>
 </html>
 `
