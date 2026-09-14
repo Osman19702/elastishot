@@ -8,13 +8,13 @@ published from a laptop.
 
 1. An npm account with two-factor authentication, logged in locally
    (`npm whoami` prints the username).
-2. A granular npm access token with read and write on packages, "bypass
-   2FA" ticked, a short expiry, stored as the repository secret
-   `NPM_TOKEN`.
-3. After the first release exists on npm, switch the package to trusted
-   publishing (npmjs.com, package settings, Trusted publisher: this
-   repository, workflow `release.yml`), remove the `NODE_AUTH_TOKEN` line
-   from the workflow and delete the token.
+2. The first version is published by hand, because a trusted publisher can
+   only be attached to a package that exists: `npm publish` from the repo
+   root (`prepublishOnly` runs the checks, then npm asks for the 2FA code).
+3. On npmjs.com, package settings, "Trusted publisher": GitHub Actions,
+   organisation or user `Osman19702`, repository `elastishot`, workflow
+   filename `release.yml`, no environment. From then on the workflow
+   publishes with provenance and no token is stored anywhere.
 
 ## Every release
 

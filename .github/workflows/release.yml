@@ -3,6 +3,13 @@ name: Release
 # Pushing a tag v<version> publishes that version to npm with provenance and
 # creates the GitHub release. The tag must match package.json and the
 # version must not exist on npm yet; everything else is the normal test run.
+#
+# Publishing uses npm trusted publishing (OpenID Connect): the package on
+# npmjs.com lists this repository and this workflow file as its trusted
+# publisher, so no npm token is stored anywhere. That needs npm 11.5 or
+# newer, hence the upgrade step. The first version was published by hand
+# with two-factor authentication, because a trusted publisher can only be
+# configured for a package that already exists.
 
 on:
   push:
@@ -32,6 +39,9 @@ jobs:
           if [ "$TAG" != "$PKG" ]; then echo "tag v$TAG but package.json says $PKG"; exit 1; fi
           if npm view "elastishot@$PKG" version >/dev/null 2>&1; then echo "elastishot@$PKG is already on npm"; exit 1; fi
 
+      - name: npm with trusted-publishing support
+        run: npm install -g npm@latest && npm --version
+
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:all
@@ -45,8 +55,6 @@ jobs:
 
       - name: Publish to npm with provenance
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Release notes from the changelog
         run: node scripts/changelog-section.mjs "${GITHUB_REF_NAME#v}" > RELEASE_NOTES.md
