@@ -8,12 +8,18 @@
  * A light-DOM <script type="application/json"> child may carry
  * { regions, locators, alignment }. Events: elastishot-ready,
  * elastishot-mode-change, elastishot-region-select.
+ *
+ * When warped-src is set and alignment.bandMap has inserted or deleted rows,
+ * both sides are drawn in one row space (see bands.ts): inserted rows are a
+ * tinted gap on the baseline side, deleted rows a gap on the candidate side,
+ * and region boxes are mapped into that space.
  */
 import type { AlignmentResult, Box, DiffRegion } from '../core/types.ts'
 import type { LocatorReport, RegionLocators } from '../locators/index.ts'
+import { alignedLayout, mapBox, visibleRows, type AlignedLayout } from './bands.ts'
 import { VIEWER_CSS } from './styles.ts'
 import { MODES, viewerTemplate, type ViewerMode } from './template.ts'
-import { matrixToCss } from './transform.ts'
+import { applyToBox, matrixToCss } from './transform.ts'
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v))
 const isMode = (v: string | null): v is ViewerMode => MODES.includes(v as ViewerMode)
@@ -43,6 +49,10 @@ export class ElastishotViewer extends HTMLElement {
   #candidateLoaded = false
   #objectUrls: string[] = []
   #initialized = false
+  /** The common row space when the band map has inserted or deleted rows; null draws the images as they are. */
+  #aligned: AlignedLayout | null = null
+  #alignedKey = ''
+  #diffImg: HTMLImageElement | null = null
 
   readonly #root: ShadowRoot
   readonly #viewport: HTMLElement
@@ -52,6 +62,8 @@ export class ElastishotViewer extends HTMLElement {
   readonly #xform: HTMLElement
   readonly #baselineImg: HTMLImageElement
   readonly #candidateImg: HTMLImageElement
+  readonly #baselineCanvas: HTMLCanvasElement
+  readonly #candidateCanvas: HTMLCanvasElement
   readonly #tint: HTMLCanvasElement
   #diffUrl: string | null = null
   readonly #regionsEl: HTMLElement
@@ -74,6 +86,8 @@ export class ElastishotViewer extends HTMLElement {
     this.#xform = q('.xform')
     this.#baselineImg = q('.layer.baseline img')
     this.#candidateImg = q('.layer.candidate img')
+    this.#baselineCanvas = q('.layer.baseline canvas.aligned')
+    this.#candidateCanvas = q('.layer.candidate canvas.aligned')
     this.#tint = q('.diff-tint')
     this.#regionsEl = q('.regions')
     this.#handleV = q('.handle.v')
@@ -276,6 +290,7 @@ export class ElastishotViewer extends HTMLElement {
    */
   #loadDiff(url: string | null): void {
     this.#diffUrl = url
+    this.#diffImg = null
     if (!url) {
       this.#tint.width = 0
       this.#tint.height = 0
@@ -284,22 +299,86 @@ export class ElastishotViewer extends HTMLElement {
     const img = new Image()
     img.onload = () => {
       if (this.#diffUrl !== url) return
-      const c = this.#tint
-      c.width = img.naturalWidth
-      c.height = img.naturalHeight
-      const ctx = c.getContext('2d')
-      if (!ctx) return
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, c.width, c.height)
-      ctx.globalCompositeOperation = 'difference'
-      ctx.drawImage(img, 0, 0)
-      ctx.globalCompositeOperation = 'lighten'
-      ctx.fillStyle = getComputedStyle(this).getPropertyValue('--es-diff').trim() || '#dc2626'
-      ctx.fillRect(0, 0, c.width, c.height)
-      ctx.globalCompositeOperation = 'source-over'
+      this.#diffImg = img
+      this.#drawTint()
     }
     img.src = url
+  }
+
+  #drawTint(): void {
+    const img = this.#diffImg
+    if (!img) return
+    const c = this.#tint
+    const aligned = this.#aligned
+    c.width = img.naturalWidth
+    c.height = aligned ? aligned.height : img.naturalHeight
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, c.width, c.height)
+    ctx.globalCompositeOperation = 'difference'
+    if (aligned) {
+      for (const s of aligned.segments) {
+        // Rows only one side has changed by definition: white under 'difference' turns black, the changed colour.
+        if (s.kind === 'inserted') {
+          ctx.fillRect(0, s.aligned.start, c.width, s.aligned.end - s.aligned.start)
+          continue
+        }
+        const v = visibleRows(s, 'baseline', img.naturalHeight)
+        if (v) ctx.drawImage(img, 0, v.from, c.width, v.count, 0, v.alignedStart, c.width, v.count)
+      }
+    } else {
+      ctx.drawImage(img, 0, 0)
+    }
+    ctx.globalCompositeOperation = 'lighten'
+    ctx.fillStyle = getComputedStyle(this).getPropertyValue('--es-diff').trim() || '#dc2626'
+    ctx.fillRect(0, 0, c.width, c.height)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  /**
+   * With a warped candidate and a band map that has inserted or deleted rows,
+   * both sides are redrawn band by band into one row space: an inserted
+   * section becomes a tinted gap on the baseline side, a deleted one a gap on
+   * the candidate side, and the rows below them line up again.
+   */
+  #alignedSpace(): AlignedLayout | null {
+    if (!this.hasAttribute('warped-src') || !this.#baselineLoaded || !this.#candidateLoaded) return null
+    const bands = this.#alignment?.bandMap
+    const bh = this.#baselineImg.naturalHeight
+    const ch = this.#candidateImg.naturalHeight
+    if (!bands?.length || !bh || !ch) return null
+    const layout = alignedLayout(bands, bh, ch)
+    return layout.hasGaps ? layout : null
+  }
+
+  #drawAligned(layout: AlignedLayout, w: number): void {
+    const key = `${this.#baselineImg.src}|${this.#candidateImg.src}|${w}|${layout.height}|${layout.segments.map((s) => `${s.kind}${s.aligned.start}`).join(',')}`
+    if (key === this.#alignedKey) return
+    this.#alignedKey = key
+    const styles = getComputedStyle(this)
+    const gapAdded = styles.getPropertyValue('--es-gap-added').trim() || 'rgba(22, 163, 74, 0.12)'
+    const gapRemoved = styles.getPropertyValue('--es-gap-removed').trim() || 'rgba(220, 38, 38, 0.12)'
+    const draw = (canvas: HTMLCanvasElement, img: HTMLImageElement, side: 'baseline' | 'candidate', gap: string) => {
+      canvas.width = w
+      canvas.height = layout.height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      for (const s of layout.segments) {
+        const r = s[side]
+        if (r.end <= r.start) {
+          ctx.fillStyle = gap
+          ctx.fillRect(0, s.aligned.start, w, s.aligned.end - s.aligned.start)
+          continue
+        }
+        // A warp that cropped the candidate leaves rows outside the image; they stay blank.
+        const v = visibleRows(s, side, img.naturalHeight)
+        if (v) ctx.drawImage(img, 0, v.from, img.naturalWidth, v.count, 0, v.alignedStart, w, v.count)
+      }
+    }
+    draw(this.#baselineCanvas, this.#baselineImg, 'baseline', gapAdded)
+    draw(this.#candidateCanvas, this.#candidateImg, 'candidate', gapRemoved)
   }
 
   #maybeReady(): void {
@@ -318,7 +397,13 @@ export class ElastishotViewer extends HTMLElement {
   }
 
   #layout(): void {
-    const { w, h } = this.#baselineSize()
+    const { w, h: baselineH } = this.#baselineSize()
+    const usingWarped = this.hasAttribute('warped-src')
+    const aligned = this.#alignedSpace()
+    const changedSpace = Boolean(aligned) !== Boolean(this.#aligned)
+    this.#aligned = aligned
+    // Nothing is cut off: a warped candidate taller than the baseline extends the stage.
+    const h = aligned ? aligned.height : usingWarped ? Math.max(baselineH, this.#candidateImg.naturalHeight || 0) : baselineH
     const zoom = this.getAttribute('zoom') ?? 'fit'
     const hostWidth = this.clientWidth || w
     this.#scale = zoom === 'fit' ? Math.min(1, hostWidth / w) : clamp(Number(zoom) || 1, 0.05, 10)
@@ -333,9 +418,15 @@ export class ElastishotViewer extends HTMLElement {
       layer.style.height = `${h}px`
     }
     this.#baselineImg.style.width = `${w}px`
-    this.#baselineImg.style.height = `${h}px`
+    this.#baselineImg.style.height = `${baselineH}px`
+    if (aligned) this.#drawAligned(aligned, w)
+    else this.#alignedKey = ''
+    for (const [img, canvas] of [[this.#baselineImg, this.#baselineCanvas], [this.#candidateImg, this.#candidateCanvas]] as const) {
+      img.hidden = Boolean(aligned)
+      canvas.hidden = !aligned
+    }
+    if (changedSpace) this.#drawTint()
 
-    const usingWarped = this.hasAttribute('warped-src')
     if (usingWarped) {
       this.#xform.style.transform = 'none'
       this.#candidateImg.style.width = `${w}px`
@@ -459,6 +550,18 @@ export class ElastishotViewer extends HTMLElement {
   }
 
   #regionBox(r: DiffRegion): Box | null {
+    const aligned = this.#aligned
+    if (aligned) {
+      // Added regions have a real box on the candidate side; in the common row space it is drawn in full.
+      if (r.boxBaseline) return mapBox(aligned, r.boxBaseline, 'baseline')
+      if (r.boxCandidate) {
+        // Candidate boxes are candidate pixels; the band map counts warped rows.
+        const m = this.#alignment?.transform.m
+        const warped = m ? applyToBox(m, r.boxCandidate) : r.boxCandidate
+        return mapBox(aligned, { x: Math.round(warped.x), y: Math.round(warped.y), w: Math.round(warped.w), h: Math.round(warped.h) }, 'candidate')
+      }
+      return null
+    }
     if (r.boxBaseline) return r.boxBaseline
     if (r.anchorBaseline) return { x: r.anchorBaseline.x, y: r.anchorBaseline.y - 2, w: r.boxCandidate?.w ?? 40, h: 4 }
     return null

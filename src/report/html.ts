@@ -77,6 +77,7 @@ tr[data-regions] { cursor: pointer; }
 .warnings { margin: 0; padding-left: 18px; } .warnings li { color: var(--new); }
 .meta th { width: 160px; color: var(--muted); font-weight: 500; }
 .reasons { margin: 6px 0 0; padding-left: 18px; color: var(--fail); }
+.structure { margin: 0; padding-left: 18px; } .structure li { margin: 3px 0; } .structure .k-added, .structure .k-removed { font-weight: 600; }
 @media (max-width: 720px) { .side-by-side { grid-template-columns: 1fr; } .card .thumbs { grid-template-columns: repeat(3, 1fr); } }
 `
 

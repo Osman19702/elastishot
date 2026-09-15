@@ -32,6 +32,33 @@ function regionRow(r: DiffRegion, locators: RegionLocators | undefined): string 
 </tr>`
 }
 
+/**
+ * One line per block of rows that only one side has, with the element behind
+ * it: the plain-language answer to "why is the similarity 65% when one card
+ * was added".
+ */
+function structureSection(p: PairReport, byRegion: Map<string, RegionLocators>): string {
+  const bands = p.alignment?.bandMap ?? []
+  const gaps = bands.map((band, index) => ({ band, index })).filter(({ band }) => band.axis === 'y' && band.kind !== 'matched')
+  if (!gaps.length) return ''
+  const items = gaps.map(({ band, index }) => {
+    const inserted = band.kind === 'inserted'
+    const rows = inserted ? band.candidate.end - band.candidate.start : band.baseline.end - band.baseline.start
+    const owners = p.regions
+      .filter((r) => r.band === index && r.kind === (inserted ? 'added' : 'removed'))
+      .map((r) => byRegion.get(r.id))
+      .map((l) => (inserted ? l?.candidate : l?.baseline) ?? null)
+      .filter((ref, i, all): ref is NonNullable<typeof ref> => ref !== null && all.findIndex((x) => x?.locator === ref.locator) === i)
+    const who = owners.length ? `: ${owners.slice(0, 3).map((o) => `${escapeHtml(displayName(o.name, 50))} ${locatorCell(o.locator)}`).join(', ')}` : ''
+    return `<li><span class="k-${inserted ? 'added' : 'removed'}">${rows} rows ${inserted ? 'inserted' : 'removed'}</span> at baseline row ${band.baseline.start}${who}</li>`
+  })
+  const delta = (p.candidate.size?.height ?? 0) - (p.baseline.size?.height ?? 0)
+  const height = delta ? ` The candidate is ${Math.abs(delta)} px ${delta > 0 ? 'taller' : 'shorter'}.` : ''
+  return `<h2>Structure</h2>
+<p class="muted">Blocks of rows that exist on one side only.${height} Rows below each block moved with it and were compared in place; the viewer shows the blocks as tinted gaps.</p>
+<ul class="structure">${items.join('')}</ul>`
+}
+
 /** One row per element that changed on screen: what a tester reads first. */
 function elementRow(l: ChangedLocator): string {
   return `<tr data-regions="${escapeHtml(l.regions.join(' '))}">
@@ -148,6 +175,7 @@ ${p.candidate.image ? `<figure><img src="${escapeHtml(p.candidate.image)}" alt="
 </div></details>`
     : ''
 }
+${structureSection(p, byRegion)}
 ${
   onScreen.length
     ? `<h2>Changed elements (${onScreen.length})</h2>

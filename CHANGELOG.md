@@ -6,6 +6,25 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-15
+
+### Fixed
+
+- The viewer sized its stage to the baseline, so a section the candidate
+  inserted (a new card at the bottom of a page) fell outside the stage and an
+  added region was drawn as a 4 px line. With a warped candidate and a band
+  map that has inserted or deleted rows, both sides are now drawn band by
+  band into one row space: inserted rows are a tinted gap on the baseline
+  side, deleted rows a gap on the candidate side, region boxes are mapped
+  into that space and the diff tint covers the gaps. A warped candidate
+  taller than the baseline extends the stage even without a band map.
+
+### Added
+
+- The pair page has a "Structure" section: one line per block of rows that
+  exists on one side only, with the element behind it and the height change,
+  so a 65% similarity caused by one added card reads as one added card.
+
 ## [0.1.1] - 2026-09-14
 
 ### Changed
@@ -44,6 +63,7 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Osman19702/elastishot/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Osman19702/elastishot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Osman19702/elastishot/releases/tag/v0.1.0

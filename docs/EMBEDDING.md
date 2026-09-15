@@ -57,9 +57,11 @@ const { result, locators, pass, failReasons } = await comparePair(
 - Properties: `regions`, `locators`, `alignment` (objects), `baseline` and `candidate` (string or Blob). Method: `selectRegion(id | null)`.
 - Events: `elastishot-ready`, `elastishot-mode-change` (`detail.mode`), `elastishot-region-select` (`detail.region`, `detail.locators`).
 - Keyboard: focus the stage and press 1-5 for modes, `f` to change the flipped side, space to pause blinking, Escape to clear the selection; the slider handle takes arrows, Home and End.
-- Theming: `--es-bg`, `--es-fg`, `--es-line`, `--es-accent`, `--es-handle`, `--es-diff`, `--es-chip-bg`, `--es-region-added`, `--es-region-removed`, `--es-region-changed`, `--es-region-moved`, `--es-font`; parts `toolbar`, `stage`, `handle`, `region`, `chip`.
+- Theming: `--es-bg`, `--es-fg`, `--es-line`, `--es-accent`, `--es-handle`, `--es-diff`, `--es-chip-bg`, `--es-region-added`, `--es-region-removed`, `--es-region-changed`, `--es-region-moved`, `--es-gap-added`, `--es-gap-removed`, `--es-font`; parts `toolbar`, `stage`, `handle`, `region`, `chip`.
 
 When `warped-src` is given the candidate is shown pixel-exact in baseline space (the engine's `artifacts.warpedCandidate`). Without it the candidate image is placed with a CSS transform built from `alignment.transform`.
+
+When `alignment.bandMap` has inserted or deleted rows (a section that appeared or collapsed), both sides are redrawn band by band into one row space: an inserted block is a tinted gap on the baseline side, a deleted one a gap on the candidate side, and the rows below line up again in every mode. Added regions are drawn as full boxes over the gap. The gap colours are `--es-gap-added` and `--es-gap-removed`.
 
 React:
 

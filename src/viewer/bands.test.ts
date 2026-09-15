@@ -1,0 +1,78 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+import type { Band } from '../core/types.ts'
+import { alignedLayout, mapBox, mapY, visibleRows } from './bands.ts'
+
+const band = (kind: Band['kind'], b: [number, number], c: [number, number]): Band => ({
+  kind,
+  axis: 'y',
+  baseline: { start: b[0], end: b[1] },
+  candidate: { start: c[0], end: c[1] },
+  similarity: kind === 'matched' ? 0.9 : 0,
+  offset: c[0] - b[0],
+})
+
+// The portfolio case: a 1296-row card inserted at row 1458 of a 1556-row page.
+const inserted = [band('matched', [0, 1458], [0, 1458]), band('inserted', [1458, 1458], [1458, 2754]), band('matched', [1458, 1556], [2754, 2852])]
+
+test('an inserted band opens a gap on the baseline side and the layout is as tall as the candidate', () => {
+  const l = alignedLayout(inserted, 1556, 2850)
+  assert.equal(l.hasGaps, true)
+  assert.equal(l.height, 1458 + 1296 + 98)
+  assert.deepEqual(l.segments.map((s) => [s.kind, s.aligned.start, s.aligned.end]), [
+    ['matched', 0, 1458],
+    ['inserted', 1458, 2754],
+    ['matched', 2754, 2852],
+  ])
+  // the band map overshot the candidate by two rows; the layout keeps the range and the drawing clips it
+  assert.equal(l.segments[2]!.candidate.end, 2852)
+  assert.deepEqual(visibleRows(l.segments[2]!, 'candidate', 2850), { from: 2754, count: 96, alignedStart: 2754 })
+})
+
+test('a warp that cropped the candidate leaves rows above the image; they are skipped, not stretched', () => {
+  // the global warp moved the candidate up 160 rows, so the first matched band starts at warped row -160
+  const l = alignedLayout([band('matched', [0, 240], [-160, 80]), band('inserted', [240, 240], [80, 240]), band('matched', [240, 680], [240, 680])], 680, 680)
+  assert.equal(l.height, 840)
+  assert.deepEqual(visibleRows(l.segments[0]!, 'candidate', 680), { from: 0, count: 80, alignedStart: 160 })
+  assert.deepEqual(visibleRows(l.segments[0]!, 'baseline', 680), { from: 0, count: 240, alignedStart: 0 })
+  assert.equal(visibleRows(l.segments[1]!, 'baseline', 680), null)
+  // the inserted block in warped rows 80..240 lands where the insertion sits in the baseline
+  assert.deepEqual(mapBox(l, { x: 18, y: 80, w: 764, h: 160 }, 'candidate'), { x: 18, y: 240, w: 764, h: 160 })
+})
+
+test('rows above the insertion keep their place, rows below move down by the inserted height', () => {
+  const l = alignedLayout(inserted, 1556, 2850)
+  assert.equal(mapY(l, 100, 'baseline'), 100)
+  assert.equal(mapY(l, 100, 'candidate'), 100)
+  assert.equal(mapY(l, 1500, 'baseline'), 1500 + 1296)
+  assert.equal(mapY(l, 2800, 'candidate'), 2800)
+  // baseline row 1458 is the first row below the insertion, so it follows the gap
+  assert.equal(mapY(l, 1458, 'baseline'), 2754)
+})
+
+test('an added region keeps its full candidate box in aligned space', () => {
+  const l = alignedLayout(inserted, 1556, 2850)
+  assert.deepEqual(mapBox(l, { x: 268, y: 1458, w: 904, h: 1296 }, 'candidate'), { x: 268, y: 1458, w: 904, h: 1296 })
+  // a baseline box below the insertion moves with its rows
+  assert.deepEqual(mapBox(l, { x: 10, y: 1500, w: 50, h: 40 }, 'baseline'), { x: 10, y: 2796, w: 50, h: 40 })
+})
+
+test('a deleted band opens a gap on the candidate side', () => {
+  const l = alignedLayout([band('matched', [0, 200], [0, 200]), band('deleted', [200, 350], [200, 200]), band('matched', [350, 500], [200, 350])], 500, 350)
+  assert.equal(l.height, 500)
+  assert.equal(mapY(l, 250, 'baseline'), 250)
+  assert.equal(mapY(l, 300, 'candidate'), 450)
+  assert.deepEqual(mapBox(l, { x: 0, y: 200, w: 10, h: 150 }, 'baseline'), { x: 0, y: 200, w: 10, h: 150 })
+})
+
+test('rows outside the band map are matched in place and a map with no gaps changes nothing', () => {
+  const l = alignedLayout([band('matched', [64, 448], [64, 448])], 500, 500)
+  assert.equal(l.hasGaps, false)
+  assert.equal(l.height, 500)
+  assert.equal(mapY(l, 20, 'baseline'), 20)
+  assert.equal(mapY(l, 480, 'candidate'), 480)
+  const empty = alignedLayout([], 300, 300)
+  assert.equal(empty.height, 300)
+  assert.equal(mapY(empty, 299, 'baseline'), 299)
+})

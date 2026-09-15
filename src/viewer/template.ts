@@ -19,8 +19,8 @@ ${buttons}
 </div>
 <div class="viewport" part="stage" tabindex="0" aria-label="comparison">
 <div class="stage">
-<div class="layer baseline"><img alt="baseline" draggable="false"></div>
-<div class="layer candidate"><div class="xform"><img alt="candidate" draggable="false"></div></div>
+<div class="layer baseline"><img alt="baseline" draggable="false"><canvas class="aligned" aria-hidden="true" hidden></canvas></div>
+<div class="layer candidate"><div class="xform"><img alt="candidate" draggable="false"></div><canvas class="aligned" aria-hidden="true" hidden></canvas></div>
 <canvas class="diff-tint" aria-hidden="true"></canvas>
 <div class="regions" role="list" aria-label="changed regions"></div>
 </div>

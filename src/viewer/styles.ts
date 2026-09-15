@@ -14,6 +14,8 @@ export const VIEWER_CSS = `
 .stage { position: relative; transform-origin: 0 0; }
 .layer { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 50% 50%; }
 .layer img { display: block; position: absolute; left: 0; top: 0; max-width: none; }
+.layer img[hidden], .layer canvas.aligned[hidden] { display: none; }
+.layer canvas.aligned { display: block; position: absolute; left: 0; top: 0; }
 .xform { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .layer.candidate { display: none; }
 .diff-tint { position: absolute; left: 0; top: 0; mix-blend-mode: multiply; display: none; pointer-events: none; }
