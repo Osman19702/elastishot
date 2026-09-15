@@ -56,6 +56,7 @@ export class ElastishotViewer extends HTMLElement {
 
   readonly #root: ShadowRoot
   readonly #viewport: HTMLElement
+  readonly #stageBox: HTMLElement
   readonly #stage: HTMLElement
   readonly #baselineLayer: HTMLElement
   readonly #candidateLayer: HTMLElement
@@ -80,6 +81,7 @@ export class ElastishotViewer extends HTMLElement {
     this.#root.innerHTML = `<style>${VIEWER_CSS}</style>${viewerTemplate()}`
     const q = <T extends Element>(sel: string): T => this.#root.querySelector(sel) as T
     this.#viewport = q('.viewport')
+    this.#stageBox = q('.stage-box')
     this.#stage = q('.stage')
     this.#baselineLayer = q('.layer.baseline')
     this.#candidateLayer = q('.layer.candidate')
@@ -122,6 +124,9 @@ export class ElastishotViewer extends HTMLElement {
       if (this.mode === 'slider') this.#startDrag(e)
     })
     this.#viewport.addEventListener('keydown', (e) => this.#viewportKey(e))
+    // The handle lives outside the scroll container (so it stays put while a
+    // tall page scrolls); its horizontal place follows the stage's scroll.
+    this.#viewport.addEventListener('scroll', () => this.#applyPosition(), { passive: true })
   }
 
   // --------------------------------------------------------------- public API
@@ -199,6 +204,8 @@ export class ElastishotViewer extends HTMLElement {
     this.#applyMode()
     this.#observer = new ResizeObserver(() => this.#layout())
     this.#observer.observe(this)
+    // The scroll container's inner width changes when its scrollbar appears.
+    this.#observer.observe(this.#viewport)
     this.#layout()
     this.#initialized = true
   }
@@ -405,14 +412,26 @@ export class ElastishotViewer extends HTMLElement {
     // Nothing is cut off: a warped candidate taller than the baseline extends the stage.
     const h = aligned ? aligned.height : usingWarped ? Math.max(baselineH, this.#candidateImg.naturalHeight || 0) : baselineH
     const zoom = this.getAttribute('zoom') ?? 'fit'
-    const hostWidth = this.clientWidth || w
-    this.#scale = zoom === 'fit' ? Math.min(1, hostWidth / w) : clamp(Number(zoom) || 1, 0.05, 10)
-    const s = this.#scale
-    this.#stage.style.width = `${w}px`
-    this.#stage.style.height = `${h}px`
-    this.#stage.style.transform = `scale(${s})`
-    this.#viewport.style.height = `${Math.round(h * s)}px`
-    this.#viewport.style.width = zoom === 'fit' ? '100%' : `${Math.round(w * s)}px`
+    const place = (s: number) => {
+      this.#scale = s
+      this.#stage.style.width = `${w}px`
+      this.#stage.style.height = `${h}px`
+      this.#stage.style.transform = `scale(${s})`
+      this.#stageBox.style.width = `${Math.round(w * s)}px`
+      this.#stageBox.style.height = `${Math.round(h * s)}px`
+      this.#viewport.style.height = `${Math.round(h * s)}px`
+      this.#viewport.style.width = zoom === 'fit' ? '100%' : `${Math.round(w * s)}px`
+    }
+    if (zoom === 'fit') {
+      // The inner width depends on whether a vertical scrollbar appears, which
+      // depends on the height the first pass produces; a second pass settles it.
+      this.#viewport.style.width = '100%'
+      place(Math.min(1, (this.#viewport.clientWidth || this.clientWidth || w) / w))
+      const inner = this.#viewport.clientWidth
+      if (inner && Math.abs(inner - w * this.#scale) > 0.5) place(Math.min(1, inner / w))
+    } else {
+      place(clamp(Number(zoom) || 1, 0.05, 10))
+    }
     for (const layer of [this.#baselineLayer, this.#candidateLayer, this.#tint]) {
       layer.style.width = `${w}px`
       layer.style.height = `${h}px`
@@ -442,11 +461,19 @@ export class ElastishotViewer extends HTMLElement {
     this.#renderRegions()
   }
 
+  /** The stage's on-screen width: the reveal edge and the handle are placed along it. */
+  #stageWidth(): number {
+    return (this.#baselineSize().w * this.#scale) || this.#viewport.clientWidth || 1
+  }
+
   #applyPosition(): void {
     const p = this.#position
     if (this.mode === 'slider') {
       this.#candidateLayer.style.clipPath = `inset(0 0 0 ${p}%)`
-      this.#handleV.style.left = `${p}%`
+      // Frame pixels, not a percentage: the frame is wider than the stage by
+      // the scrollbar, and the stage may be scrolled sideways under a zoom.
+      const x = (p / 100) * this.#stageWidth() - this.#viewport.scrollLeft + this.#viewport.clientLeft
+      this.#handleV.style.left = `${Math.round(x)}px`
     } else {
       this.#candidateLayer.style.clipPath = 'none'
     }
@@ -506,8 +533,8 @@ export class ElastishotViewer extends HTMLElement {
     if (e.button !== 0) return
     const move = (ev: PointerEvent) => {
       const rect = this.#viewport.getBoundingClientRect()
-      const p = ((ev.clientX - rect.left) / rect.width) * 100
-      this.position = p
+      const x = ev.clientX - rect.left - this.#viewport.clientLeft + this.#viewport.scrollLeft
+      this.position = (x / this.#stageWidth()) * 100
     }
     const up = () => {
       window.removeEventListener('pointermove', move)

@@ -9,9 +9,11 @@ export const VIEWER_CSS = `
 .toolbar label[hidden] { display: none; }
 .toolbar input[type="range"] { width: 120px; }
 :host([no-toolbar]) .toolbar { display: none; }
+.frame { position: relative; max-width: 100%; }
 .viewport { position: relative; overflow: auto; background: var(--_bg); border: 1px solid var(--_line); border-radius: 8px; outline: none; max-width: 100%; }
 .viewport:focus-visible { outline: 2px solid var(--_accent); }
-.stage { position: relative; transform-origin: 0 0; }
+.stage-box { position: relative; overflow: hidden; }
+.stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .layer { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 50% 50%; }
 .layer img { display: block; position: absolute; left: 0; top: 0; max-width: none; }
 .layer img[hidden], .layer canvas.aligned[hidden] { display: none; }

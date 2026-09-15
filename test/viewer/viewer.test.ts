@@ -138,6 +138,29 @@ test('clicking a region selects it, shows the chip and dispatches the event', as
   assert.deepEqual(events.filter((e) => e[0] === 'select').map((e) => e[1]), ['r1', null])
 })
 
+test('the handle stays in the frame while a tall stage scrolls, and still drags', async () => {
+  await viewer().evaluate((el) => el.setAttribute('mode', 'slider'))
+  await page.addStyleTag({ content: 'elastishot-viewer::part(stage) { max-height: 240px; }' })
+  await page.waitForTimeout(100)
+  const scrolled = await inShadow('.viewport').evaluate((el) => {
+    el.scrollTop = 200
+    const v = el.getBoundingClientRect()
+    return { top: v.top, height: v.height, scrollTop: el.scrollTop, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }
+  })
+  assert.ok(scrolled.scrollTop > 100, JSON.stringify(scrolled))
+  assert.ok(scrolled.scrollWidth <= scrolled.clientWidth + 1, `horizontal overflow: ${JSON.stringify(scrolled)}`)
+  const handle = await inShadow('.handle.v').boundingBox()
+  assert.ok(handle && Math.abs(handle.y - scrolled.top) <= 2 && Math.abs(handle.height - scrolled.height) <= 2, JSON.stringify({ handle, scrolled }))
+  const before = await handle
+  await page.mouse.move(before!.x + 1, before!.y + before!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(before!.x + 120, before!.y + before!.height / 2, { steps: 4 })
+  await page.mouse.up()
+  const after = await inShadow('.handle.v').boundingBox()
+  assert.ok(after && after.x > before!.x + 100, JSON.stringify({ before, after }))
+  assert.equal(await inShadow('.handle.v').getAttribute('aria-valuenow'), String(await viewer().evaluate((el) => (el as unknown as { position: number }).position)))
+})
+
 test('no errors were logged', () => {
   assert.deepEqual(errors, [])
 })

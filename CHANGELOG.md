@@ -6,6 +6,18 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-15
+
+### Fixed
+
+- The slider handle and the region chip sat inside the viewer's scroll
+  container, so on a page taller than the stage they scrolled away with the
+  image and the handle covered only the top of it. They now sit in a frame
+  around the scroll container and stay in view; the reveal edge follows the
+  stage's horizontal scroll under a zoom. The stage is wrapped in a box with
+  its scaled layout size, so a vertical scrollbar no longer brings a
+  horizontal one, and the stage refits when the scrollbar appears.
+
 ## [0.1.2] - 2026-09-15
 
 ### Fixed
@@ -63,7 +75,8 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/Osman19702/elastishot/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Osman19702/elastishot/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Osman19702/elastishot/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Osman19702/elastishot/releases/tag/v0.1.0
