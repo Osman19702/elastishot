@@ -6,6 +6,29 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Lane alignment: when side-by-side columns move independently (a card
+  whose left column gains a line while its right column stays), the row
+  alignment leaves a stretch of short bands, inserts and deletes that make
+  unchanged text look changed. Such a conflict zone is now cut at its
+  gutters into lanes, each lane is aligned on its own, and the lane bands
+  replace the zone's bands when they pair at least as many content cells
+  exactly. Bands carry `columns` in `report.json`; the viewer draws each
+  lane in its own row space and the pair page's Structure section names
+  the lane. Padding that grew in a lane that did not (a card's inner
+  margin) is not a region. The UI lab gained an eighth build for it.
+- The viewer's toolbar has a "Hide regions" checkbox (attribute
+  `hide-regions`, key `r`) that hides the region boxes in every mode,
+  including Diff, so the pixels underneath can be read; the pair page has
+  the same checkbox next to the mode buttons.
+
+### Fixed
+
+- Rows of a gap with no edge whose colour matches the flat rows just
+  outside it are padding that grew, whatever the colour; they no longer
+  become an "added" or "removed" region of a card's background.
+
 ## [0.1.4] - 2026-09-16
 
 ### Changed

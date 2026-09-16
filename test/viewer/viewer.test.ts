@@ -161,6 +161,20 @@ test('the handle stays in the frame while a tall stage scrolls, and still drags'
   assert.equal(await inShadow('.handle.v').getAttribute('aria-valuenow'), String(await viewer().evaluate((el) => (el as unknown as { position: number }).position)))
 })
 
+test('the "Hide regions" checkbox and the r key hide the boxes in every mode, including diff', async () => {
+  await viewer().evaluate((el) => el.setAttribute('mode', 'diff'))
+  assert.equal(await inShadow('div.regions').evaluate((el) => getComputedStyle(el).display), 'block')
+  await inShadow('label.regions-toggle input').check()
+  assert.equal(await viewer().evaluate((el) => el.hasAttribute('hide-regions')), true)
+  assert.equal(await inShadow('div.regions').evaluate((el) => getComputedStyle(el).display), 'none')
+  await inShadow('.viewport').focus()
+  await page.keyboard.press('r')
+  assert.equal(await viewer().evaluate((el) => el.hasAttribute('hide-regions')), false)
+  assert.equal(await inShadow('label.regions-toggle input').isChecked(), false)
+  assert.equal(await inShadow('div.regions').evaluate((el) => getComputedStyle(el).display), 'block')
+  await viewer().evaluate((el) => el.setAttribute('mode', 'slider'))
+})
+
 test('no errors were logged', () => {
   assert.deepEqual(errors, [])
 })

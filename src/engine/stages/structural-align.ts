@@ -11,8 +11,9 @@
  */
 import type { Band, Box } from '../../core/types.ts'
 import type { Mat } from '../cv/cv-types.ts'
-import { colEnergy, edgeMagnitude, rowEnergy } from '../cv/ops.ts'
+import { colEnergy, edgeMagnitude, roi, rowEnergy } from '../cv/ops.ts'
 import type { GlobalAlignOutput, StructuralAlignOutput, Warped, WorkingRegion } from '../model.ts'
+import { conflictZones, GUTTER_EDGE_SHARE, laneTiles } from '../pure/lanes.ts'
 import { alignRows, hashRow, NO_ROW } from '../pure/row-align.ts'
 import { gapScore } from '../pure/scoring.ts'
 import { alignSequences, MAX_CELLS, opsToRuns, repairSubstitutions, type Run } from '../pure/sequence-align.ts'
@@ -74,14 +75,14 @@ const CONTENT_SPREAD = 8
 /** The band map is discarded when the plain global alignment pairs this many times more content cells exactly. */
 const EXACT_MARGIN = 1.1
 
-/** Mean absolute grey difference between baseline rows [b0, b0+len) and canvas rows [c0, c0+len), sub-sampled. */
-function bandDifference(a: Uint8Array, b: Uint8Array, width: number, b0: number, c0: number, len: number): number {
+/** Mean absolute grey difference between baseline rows [b0, b0+len) and canvas rows [c0, c0+len), sub-sampled, over columns [x0, x1). */
+function bandDifference(a: Uint8Array, b: Uint8Array, width: number, b0: number, c0: number, len: number, x0 = 0, x1 = width): number {
   let sum = 0
   let n = 0
   for (let y = 0; y < len; y += REFINE_STEP) {
     const ra = (b0 + y) * width
     const rb = (c0 + y) * width
-    for (let x = 0; x < width; x += REFINE_STEP) {
+    for (let x = x0; x < x1; x += REFINE_STEP) {
       sum += Math.abs(a[ra + x]! - b[rb + x]!)
       n++
     }
@@ -97,18 +98,20 @@ function bandDifference(a: Uint8Array, b: Uint8Array, width: number, b0: number,
  * neighbouring panel changed.
  */
 function exactContentCells(bands: Band[], grayB: Uint8Array, grayW: Uint8Array, width: number, baselineHeight: number, canvasHeight: number, pad: number): number {
-  const blockW = Math.max(1, Math.floor(width / EXACT_BLOCKS))
   let cells = 0
   for (const band of bands) {
     if (band.kind !== 'matched') continue
+    const cx0 = band.columns?.start ?? 0
+    const cx1 = band.columns?.end ?? width
+    const blockW = Math.max(1, Math.floor((cx1 - cx0) / EXACT_BLOCKS))
     const y0 = Math.max(0, band.baseline.start)
     const y1 = Math.min(baselineHeight, band.baseline.end)
     for (let y = y0; y < y1; y += REFINE_STEP) {
       const c = y + band.offset + pad
       if (c < 0 || c >= canvasHeight) continue
       for (let k = 0; k < EXACT_BLOCKS; k++) {
-        const x0 = k * blockW
-        const x1 = k === EXACT_BLOCKS - 1 ? width : x0 + blockW
+        const x0 = cx0 + k * blockW
+        const x1 = k === EXACT_BLOCKS - 1 ? cx1 : x0 + blockW
         let lo = 255
         let hi = 0
         let sum = 0
@@ -232,6 +235,117 @@ function exactRowBands(input: GlobalAlignOutput): Band[] | null {
     }
     return { kind: r.kind, axis: 'y', baseline, candidate, similarity, offset: candidate.start - baseline.start }
   })
+}
+
+/** Hash rows [y0, y1) of one side over columns [x0, x1); canvas rows not fully covered hash as NO_ROW. */
+function laneHashes(rgba: Uint8Array, gray: Uint8Array, width: number, y0: number, y1: number, x0: number, x1: number, cov: Uint8Array | null): { hashes: Float64Array; blank: Uint8Array } {
+  const n = Math.max(0, y1 - y0)
+  const hashes = new Float64Array(n)
+  const blank = new Uint8Array(n)
+  for (let k = 0; k < n; k++) {
+    const row = (y0 + k) * width
+    let covered = true
+    if (cov) {
+      for (let x = x0; x < x1; x++) {
+        if (cov[row + x] !== 255) {
+          covered = false
+          break
+        }
+      }
+    }
+    hashes[k] = covered ? hashRow(rgba, (row + x0) * 4, (row + x1) * 4) : NO_ROW
+    blank[k] = flatRow(gray, row + x0, row + x1)
+  }
+  return { hashes, blank }
+}
+
+/**
+ * Re-align each conflict zone of a row-aligned band map lane by lane, see
+ * pure/lanes.ts. A zone's rows are cut at the gutters that are blank on both
+ * sides for the whole zone; each lane's rows are hashed over its own columns
+ * and aligned on their own, and the lane bands replace the zone's bands when
+ * they pair at least as many content cells exactly. Everything outside the
+ * zones keeps its full-width bands.
+ */
+function laneAlign(input: GlobalAlignOutput, bands: Band[], edges: { baseline: Mat; warped: Mat }, stripPx: number, debug?: (...args: unknown[]) => void): Band[] {
+  const zones = conflictZones(bands)
+  if (!zones.length) return bands
+  const B = input.baseline
+  const W = input.warped
+  const pad = W.padTop
+  const width = B.width
+  const grayB = B.gray.data
+  const grayW = W.gray.data
+  const rgbaB = B.rgba.data
+  const rgbaW = W.rgba.data
+  const cov = W.coverage.data
+  const blurB = B.grayBlur.data
+  const blurW = W.grayBlur.data
+  const out: Band[] = []
+  let cursor = 0
+  for (const zone of zones) {
+    out.push(...bands.slice(cursor, zone.from))
+    cursor = zone.to
+    const zoneBands = bands.slice(zone.from, zone.to)
+    const z0 = Math.max(0, Math.min(...zoneBands.map((b) => b.baseline.start)))
+    const z1 = Math.min(B.height, Math.max(...zoneBands.map((b) => b.baseline.end)))
+    const c0 = Math.max(-pad, Math.min(...zoneBands.map((b) => b.candidate.start)))
+    const c1 = Math.min(W.height - pad, Math.max(...zoneBands.map((b) => b.candidate.end)))
+    if (z1 - z0 < 2 || c1 - c0 < 2) {
+      out.push(...zoneBands)
+      continue
+    }
+    // Gutters: columns with no edge in (nearly) every row of the zone on both
+    // sides. A card background differs from the page background, so colour
+    // is no criterion; a border line crossing the column is allowed for.
+    const edgeB = edges.baseline.data
+    const edgeW = edges.warped.data
+    const edgeRows = new Uint32Array(width)
+    for (let y = z0; y < z1; y++) {
+      const row = y * width
+      for (let x = 0; x < width; x++) if (edgeB[row + x]! >= BLANK_ROW_ENERGY) edgeRows[x]++
+    }
+    for (let y = c0 + pad; y < c1 + pad; y++) {
+      const row = y * width
+      for (let x = 0; x < width; x++) if (cov[row + x] === 255 && edgeW[row + x]! >= BLANK_ROW_ENERGY) edgeRows[x]++
+    }
+    const allowed = Math.max(2, Math.floor(GUTTER_EDGE_SHARE * (z1 - z0 + c1 - c0)))
+    const blank = new Uint8Array(width)
+    for (let x = 0; x < width; x++) blank[x] = edgeRows[x]! <= allowed ? 1 : 0
+    const tiles = laneTiles(blank, width)
+    if (tiles.length < 2) {
+      out.push(...zoneBands)
+      continue
+    }
+    const laneBands: Band[] = []
+    for (const tile of tiles) {
+      const a = laneHashes(rgbaB, grayB, width, z0, z1, tile.start, tile.end, null)
+      const b = laneHashes(rgbaW, grayW, width, c0 + pad, c1 + pad, tile.start, tile.end, cov)
+      const runs = alignRows({ a: a.hashes, b: b.hashes, blankA: a.blank, blankB: b.blank })
+      const tileBands: Band[] = []
+      for (const r of runs) {
+        let similarity = 0
+        if (r.kind === 'matched') {
+          let same = 0
+          for (let k = 0; k < r.b1 - r.b0; k++) if (a.hashes[r.b0 + k] === b.hashes[r.c0 + k]) same++
+          similarity = same / Math.max(1, r.b1 - r.b0)
+        }
+        const baseline = { start: z0 + r.b0, end: z0 + r.b1 }
+        const candidate = { start: c0 + r.c0, end: c0 + r.c1 }
+        tileBands.push({ kind: r.kind, axis: 'y', baseline, candidate, similarity, offset: candidate.start - baseline.start, columns: { ...tile } })
+      }
+      // Rows that replaced each other in a lane (an illustration re-rendered
+      // half a pixel lower) still get their offset refined to the pixel.
+      laneBands.push(...refineOffsets(tileBands, B, W, stripPx, true))
+    }
+    const viaLanes = exactContentCells(laneBands, blurB, blurW, width, B.height, W.height, pad)
+    const viaRows = exactContentCells(zoneBands, blurB, blurW, width, B.height, W.height, pad)
+    if (debug) debug('lanes', { zone: [z0, z1, c0, c1], tiles, viaLanes, viaRows, bands: laneBands.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}[${b.columns!.start}-${b.columns!.end}]`) })
+    if (viaLanes >= viaRows) out.push(...laneBands)
+    else out.push(...zoneBands)
+  }
+  out.push(...bands.slice(cursor))
+  return out
 }
 
 interface Signatures {
@@ -519,6 +633,35 @@ function splitByBlankRows(blank: Uint8Array, y0: number, y1: number): Array<{ y0
   return parts.length ? parts : [{ y0, y1, blank: true }]
 }
 
+/**
+ * Rows with no edge at all whose colour matches the nearest flat rows just
+ * outside them are padding that grew (a card's inner margin), whatever the
+ * colour. A flat banner of its own colour has neighbours of another colour
+ * and stays content.
+ */
+function isPadding(edge: Mat, gray: Mat, y0: number, y1: number): boolean {
+  const energy = rowEnergy(edge, y0, y1)
+  // The blurred edge of a text line bleeds a row or two into the padding under it.
+  let edged = 0
+  for (let k = 0; k < energy.length; k++) if (energy[k]! >= BLANK_ROW_ENERGY) edged++
+  if (edged > 2) return false
+  const means = rowEnergy(gray, y0, y1)
+  let sum = 0
+  for (let k = 0; k < means.length; k++) sum += means[k]!
+  const mean = sum / Math.max(1, means.length)
+  const reach = 8
+  const flatNeighbour = (from: number, step: number): number | null => {
+    for (let y = from, n = 0; n < reach && y >= 0 && y < edge.rows; y += step, n++) {
+      if (rowEnergy(edge, y, y + 1)[0]! < BLANK_ROW_ENERGY) return rowEnergy(gray, y, y + 1)[0]!
+    }
+    return null
+  }
+  const above = flatNeighbour(y0 - 1, -1)
+  const below = flatNeighbour(y1, 1)
+  if (above === null && below === null) return false
+  return (above === null || Math.abs(above - mean) < BG_TOLERANCE) && (below === null || Math.abs(below - mean) < BG_TOLERANCE)
+}
+
 function contentColumns(edge: Mat, gray: Mat, y0: number, y1: number, bg: number): { x0: number; x1: number } | null {
   const cols = colEnergy(edge, y0, y1)
   const means = colEnergy(gray, y0, y1)
@@ -534,36 +677,50 @@ function contentColumns(edge: Mat, gray: Mat, y0: number, y1: number, bg: number
   return { x0: Math.max(0, x0 - CONTENT_PAD), x1: Math.min(cols.length, x1 + CONTENT_PAD) }
 }
 
-function gapRegions(input: GlobalAlignOutput, bands: Band[], edges: { baseline: Mat; warped: Mat }): WorkingRegion[] {
+function gapRegions(ctx: StageContext, input: GlobalAlignOutput, bands: Band[], edges: { baseline: Mat; warped: Mat }): WorkingRegion[] {
   const B = input.baseline
   const pad = input.warped.padTop
   const pageArea = B.width * B.height
   const confidence = 0.6 + 0.4 * input.confidence
   const bg = pageBackground(B.grayBlur)
   const out: WorkingRegion[] = []
+  // A lane band is judged on its own columns: a continuous copy of that strip.
+  const laneMat = (mat: Mat, columns: Band['columns']): Mat => {
+    if (!columns) return mat
+    const view = roi(ctx, mat, { x: columns.start, y: 0, w: columns.end - columns.start, h: mat.rows })
+    const copy = ctx.mats.mat()
+    view.copyTo(copy)
+    ctx.mats.release(view)
+    return copy
+  }
   bands.forEach((band, index) => {
     if (band.kind === 'matched') return
     const inserted = band.kind === 'inserted'
-    const edge = inserted ? edges.warped : edges.baseline
-    const gray = inserted ? input.warped.grayBlur : B.grayBlur
+    const edge = laneMat(inserted ? edges.warped : edges.baseline, band.columns)
+    const gray = laneMat(inserted ? input.warped.grayBlur : B.grayBlur, band.columns)
+    const laneX = band.columns?.start ?? 0
     const shift = inserted ? pad : 0
     const range = inserted ? band.candidate : band.baseline
     const y0 = Math.max(0, range.start + shift)
     const y1 = Math.min(edge.rows, range.end + shift)
     if (y1 <= y0) return
     const blank = blankRows(edge, gray, y0, y1, bg)
-    const parts = splitByBlankRows(blank, y0, y1)
+    const parts = splitByBlankRows(blank, y0, y1).map((part) => (part.blank || !isPadding(edge, gray, part.y0, part.y1) ? part : { ...part, blank: true }))
+    // Padding of a lane that did not grow is never a region: the lane that
+    // grew reports the rows that carry content.
+    const own = band.columns ? parts.filter((p) => !p.blank) : parts
     // The edge energy of a border line bleeds a row or two into the padding
     // next to it, and a gap boundary on a strip edge can swallow the edge
     // rows of a neighbouring line: content parts that short are slivers, and
     // a gap made only of slivers is padding.
-    const kept = parts.filter((p) => p.blank || p.y1 - p.y0 >= MIN_PART_ROWS)
+    const kept = own.filter((p) => p.blank || p.y1 - p.y0 >= MIN_PART_ROWS)
+    if (band.columns && !kept.length) return
     for (const part of kept.length ? kept : [{ y0, y1, blank: true }]) {
       const cols = part.blank ? null : contentColumns(edge, gray, part.y0, part.y1, bg)
       const whitespace = cols === null
       const box: Box = whitespace
-        ? { x: 0, y: part.y0 - shift, w: edge.cols, h: part.y1 - part.y0 }
-        : { x: cols.x0, y: part.y0 - shift, w: cols.x1 - cols.x0, h: part.y1 - part.y0 }
+        ? { x: laneX, y: part.y0 - shift, w: edge.cols, h: part.y1 - part.y0 }
+        : { x: laneX + cols.x0, y: part.y0 - shift, w: cols.x1 - cols.x0, h: part.y1 - part.y0 }
       const area = box.w * box.h
       const tags = [inserted ? 'inserted-rows' : 'deleted-rows']
       if (whitespace) tags.push('whitespace-only')
@@ -583,6 +740,10 @@ function gapRegions(input: GlobalAlignOutput, bands: Band[], edges: { baseline: 
         band: index,
         tags,
       })
+    }
+    if (band.columns) {
+      ctx.mats.release(edge)
+      ctx.mats.release(gray)
     }
   })
   return out
@@ -617,7 +778,7 @@ function refineOffsets(bands: Band[], B: GlobalAlignOutput['baseline'], W: Warpe
     const at = (d: number): number => {
       const cd = c0 + d
       if (cd < 0 || cd + len > W.height) return Infinity
-      return bandDifference(dataB, dataW, B.width, band.baseline.start, cd, len)
+      return bandDifference(dataB, dataW, B.width, band.baseline.start, cd, len, band.columns?.start ?? 0, band.columns?.end ?? B.width)
     }
     const base = at(0)
     if (!Number.isFinite(base)) continue
@@ -639,7 +800,8 @@ function refineOffsets(bands: Band[], B: GlobalAlignOutput['baseline'], W: Warpe
   const merged: Band[] = []
   for (const band of bands) {
     const last = merged[merged.length - 1]
-    if (last && last.kind === 'matched' && band.kind === 'matched' && last.offset === band.offset && last.baseline.end >= band.baseline.start) {
+    const sameLane = last?.columns?.start === band.columns?.start && last?.columns?.end === band.columns?.end
+    if (last && sameLane && last.kind === 'matched' && band.kind === 'matched' && last.offset === band.offset && last.baseline.end >= band.baseline.start) {
       const n1 = last.baseline.end - last.baseline.start
       const n2 = band.baseline.end - band.baseline.start
       last.similarity = (last.similarity * n1 + band.similarity * n2) / Math.max(1, n1 + n2)
@@ -665,7 +827,7 @@ export const structuralAlignStage: Stage<GlobalAlignOutput, StructuralAlignOutpu
       stripPx,
       matchedFraction,
       edges,
-      gapRegions: gapRegions(input, bands, edges),
+      gapRegions: gapRegions(ctx, input, bands, edges),
     })
 
     const shared = Math.min(B.height, W.height - pad)
@@ -762,13 +924,16 @@ export const structuralAlignStage: Stage<GlobalAlignOutput, StructuralAlignOutpu
       const rowBands = ctx.time('rowAlign', () => exactRowBands(input))
       if (rowBands && rowBands.length) {
         const rowWarnings: Array<() => void> = []
-        const refined = refineOffsets(dropCroppedEdges(buffered(rowWarnings), rowBands, B.height, W), B, W, stripPx, true)
+        const dbg = debugSink()
+        // Side-by-side columns that moved on their own leave the row bands in
+        // a tangle the strips may beat; the lanes untangle it first, so the
+        // arbitration sees the row alignment at its best.
+        const refined = laneAlign(input, refineOffsets(dropCroppedEdges(buffered(rowWarnings), rowBands, B.height, W), B, W, stripPx, true), edges, stripPx, dbg)
         const grayB = B.grayBlur.data
         const grayW = W.grayBlur.data
         const viaRows = exactContentCells(refined, grayB, grayW, B.width, B.height, W.height, pad)
         const viaStrips = exactContentCells(bands, grayB, grayW, B.width, B.height, W.height, pad)
-        const dbg = debugSink()
-        if (dbg) dbg('rowAlign', { viaRows, viaStrips, bands: refined.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}`) })
+        if (dbg) dbg('rowAlign', { viaRows, viaStrips, bands: refined.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}${b.columns ? `[${b.columns.start}-${b.columns.end}]` : ''}`) })
         if (viaRows >= viaStrips) {
           bands = refined
           later.length = 0

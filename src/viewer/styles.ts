@@ -23,6 +23,7 @@ export const VIEWER_CSS = `
 .diff-tint { position: absolute; left: 0; top: 0; mix-blend-mode: multiply; display: none; pointer-events: none; }
 .regions { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; display: none; }
 :host([show-regions]) .regions, :host([mode="diff"]) .regions { display: block; }
+:host([hide-regions]) .regions { display: none; }
 .region { position: absolute; margin: 0; padding: 0; background: transparent; border: 2px solid var(--_c); pointer-events: auto; cursor: pointer; }
 .region:focus-visible, .region.selected { box-shadow: 0 0 0 3px var(--_c), 0 0 0 5px #fff; }
 .region.k-added { --_c: var(--es-region-added, #16a34a); }

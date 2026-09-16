@@ -14,6 +14,7 @@ const scenarios = [
   ['expansions', 5],
   ['images', 6],
   ['release', 7],
+  ['columns', 8],
 ]
 
 export default {

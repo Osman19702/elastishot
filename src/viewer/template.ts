@@ -16,6 +16,7 @@ export function viewerTemplate(): string {
 ${buttons}
 <label class="opacity" hidden>Opacity <input type="range" min="0" max="100" value="50" aria-label="Candidate opacity"></label>
 <label class="blink" hidden><button type="button" class="pause" aria-pressed="false">Pause</button></label>
+<label class="regions-toggle"><input type="checkbox"> Hide regions</label>
 </div>
 <div class="frame">
 <div class="viewport" part="stage" tabindex="0" aria-label="comparison">

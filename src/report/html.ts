@@ -65,6 +65,7 @@ code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; 
 .filters, .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .filters button, .toolbar button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 8px; cursor: pointer; }
 .filters button[aria-pressed="true"], .toolbar button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+.toolbar .toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; font-size: 13px; color: var(--muted); cursor: pointer; }
 .side-by-side { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .side-by-side figure { margin: 0; } .side-by-side img { width: 100%; height: auto; border: 1px solid var(--line); background: #fff; }
 .side-by-side figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
 elastishot-viewer { display: block; margin: 12px 0; max-width: 100%; }

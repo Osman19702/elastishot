@@ -50,12 +50,13 @@ function structureSection(p: PairReport, byRegion: Map<string, RegionLocators>):
       .map((l) => (inserted ? l?.candidate : l?.baseline) ?? null)
       .filter((ref, i, all): ref is NonNullable<typeof ref> => ref !== null && all.findIndex((x) => x?.locator === ref.locator) === i)
     const who = owners.length ? `: ${owners.slice(0, 3).map((o) => `${escapeHtml(displayName(o.name, 50))} ${locatorCell(o.locator)}`).join(', ')}` : ''
-    return `<li><span class="k-${inserted ? 'added' : 'removed'}">${rows} rows ${inserted ? 'inserted' : 'removed'}</span> at baseline row ${band.baseline.start}${who}</li>`
+    const lane = band.columns ? ` in columns ${band.columns.start}–${band.columns.end}` : ''
+    return `<li><span class="k-${inserted ? 'added' : 'removed'}">${rows} rows ${inserted ? 'inserted' : 'removed'}</span> at baseline row ${band.baseline.start}${lane}${who}</li>`
   })
   const delta = (p.candidate.size?.height ?? 0) - (p.baseline.size?.height ?? 0)
   const height = delta ? ` The candidate is ${Math.abs(delta)} px ${delta > 0 ? 'taller' : 'shorter'}.` : ''
   return `<h2>Structure</h2>
-<p class="muted">Blocks of rows that exist on one side only.${height} Rows below each block moved with it and were compared in place; the viewer shows the blocks as tinted gaps.</p>
+<p class="muted">Blocks of rows that exist on one side only.${height} Rows below each block moved with it and were compared in place; the viewer shows the blocks as tinted gaps. A block "in columns" belongs to one of several side-by-side columns that moved on their own.</p>
 <ul class="structure">${items.join('')}</ul>`
 }
 
@@ -117,6 +118,11 @@ const show = (id) => { select(id); if (viewer && typeof viewer.selectRegion === 
 for (const tr of rows) tr.addEventListener('click', () => show(tr.dataset.regionId))
 for (const tr of document.querySelectorAll('tr[data-regions]')) tr.addEventListener('click', () => { const first = tr.dataset.regions.split(' ')[0]; if (first) show(first) })
 if (viewer) viewer.addEventListener('elastishot-region-select', (e) => select(e.detail && e.detail.region ? e.detail.region.id : null))
+const hideRegions = document.getElementById('hide-regions')
+if (viewer && hideRegions) {
+  hideRegions.addEventListener('change', () => viewer.toggleAttribute('hide-regions', hideRegions.checked))
+  new MutationObserver(() => { hideRegions.checked = viewer.hasAttribute('hide-regions') }).observe(viewer, { attributes: true, attributeFilter: ['hide-regions'] })
+}
 const modeButtons = [...document.querySelectorAll('.toolbar button[data-mode]')]
 for (const b of modeButtons) b.addEventListener('click', () => {
   if (viewer) viewer.setAttribute('mode', b.dataset.mode)
@@ -165,7 +171,7 @@ ${p.failReasons.length ? `<ul class="reasons">${p.failReasons.map((r) => `<li>${
 ${p.error ? `<p class="reasons">${escapeHtml(p.error)}</p>` : ''}
 ${
   p.baseline.image || p.candidate.image
-    ? `<div class="toolbar" role="group" aria-label="viewer mode">${MODES.map(([m, label], i) => `<button type="button" data-mode="${m}" aria-pressed="${i === 0}">${label}</button>`).join('')}</div>
+    ? `<div class="toolbar" role="group" aria-label="viewer mode">${MODES.map(([m, label], i) => `<button type="button" data-mode="${m}" aria-pressed="${i === 0}">${label}</button>`).join('')}<label class="toggle"><input type="checkbox" id="hide-regions"> Hide region boxes</label></div>
 <elastishot-viewer ${viewerAttrs}>
 <script type="application/json" id="es-data">${jsonForScript(data)}</script>
 </elastishot-viewer>

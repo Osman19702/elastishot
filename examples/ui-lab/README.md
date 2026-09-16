@@ -2,7 +2,7 @@
 
 A localhost test bed for Elastishot. `site.mjs` renders "Lumen", a small
 product page for a fictional product (any resemblance to a real company or
-product is accidental), in seven builds:
+product is accidental), in eight builds:
 
 | Build | Scenario | What changes |
 |---|---|---|

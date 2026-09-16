@@ -4,7 +4,9 @@
  * Attributes: baseline-src, candidate-src, diff-src, warped-src, mode
  * (slider | flip | blink | overlay | diff), position (0-100),
  * opacity (0-1), flip-side (baseline | candidate), blink-ms, zoom (fit | number),
- * show-regions, no-toolbar. Properties: regions, locators, alignment.
+ * show-regions, hide-regions (hides the region boxes in every mode; the
+ * toolbar checkbox and the r key toggle it), no-toolbar. Properties:
+ * regions, locators, alignment.
  * A light-DOM <script type="application/json"> child may carry
  * { regions, locators, alignment }. Events: elastishot-ready,
  * elastishot-mode-change, elastishot-region-select.
@@ -16,7 +18,7 @@
  */
 import type { AlignmentResult, Box, DiffRegion } from '../core/types.ts'
 import type { LocatorReport, RegionLocators } from '../locators/index.ts'
-import { alignedLayout, mapBox, visibleRows, type AlignedLayout } from './bands.ts'
+import { laneFor, laneLayouts, mapBox, visibleRows, type LaneLayout } from './bands.ts'
 import { VIEWER_CSS } from './styles.ts'
 import { MODES, viewerTemplate, type ViewerMode } from './template.ts'
 import { applyToBox, matrixToCss } from './transform.ts'
@@ -32,7 +34,7 @@ export interface ViewerData {
 
 export class ElastishotViewer extends HTMLElement {
   static get observedAttributes(): string[] {
-    return ['baseline-src', 'candidate-src', 'diff-src', 'warped-src', 'mode', 'position', 'opacity', 'flip-side', 'blink-ms', 'zoom', 'show-regions']
+    return ['baseline-src', 'candidate-src', 'diff-src', 'warped-src', 'mode', 'position', 'opacity', 'flip-side', 'blink-ms', 'zoom', 'show-regions', 'hide-regions']
   }
 
   #regions: DiffRegion[] = []
@@ -49,8 +51,8 @@ export class ElastishotViewer extends HTMLElement {
   #candidateLoaded = false
   #objectUrls: string[] = []
   #initialized = false
-  /** The common row space when the band map has inserted or deleted rows; null draws the images as they are. */
-  #aligned: AlignedLayout | null = null
+  /** The common row space per lane when the band map has inserted or deleted rows; null draws the images as they are. */
+  #aligned: LaneLayout[] | null = null
   #alignedKey = ''
   #diffImg: HTMLImageElement | null = null
 
@@ -74,6 +76,7 @@ export class ElastishotViewer extends HTMLElement {
   readonly #opacityInput: HTMLInputElement
   readonly #blinkLabel: HTMLElement
   readonly #pauseButton: HTMLButtonElement
+  readonly #hideRegionsInput: HTMLInputElement
 
   constructor() {
     super()
@@ -98,6 +101,7 @@ export class ElastishotViewer extends HTMLElement {
     this.#opacityInput = q('label.opacity input')
     this.#blinkLabel = q('label.blink')
     this.#pauseButton = q('button.pause')
+    this.#hideRegionsInput = q('label.regions-toggle input')
 
     this.#baselineImg.addEventListener('load', () => {
       this.#baselineLoaded = true
@@ -114,6 +118,7 @@ export class ElastishotViewer extends HTMLElement {
     }
     this.#opacityInput.addEventListener('input', () => this.setAttribute('opacity', String(Number(this.#opacityInput.value) / 100)))
     this.#pauseButton.addEventListener('click', () => this.#setBlinkPaused(!this.#blinkPaused))
+    this.#hideRegionsInput.addEventListener('change', () => this.toggleAttribute('hide-regions', this.#hideRegionsInput.checked))
     this.#handleV.addEventListener('keydown', (e) => this.#handleKey(e))
     this.#handleV.addEventListener('pointerdown', (e) => this.#startDrag(e))
     this.#viewport.addEventListener('pointerdown', (e) => {
@@ -247,6 +252,9 @@ export class ElastishotViewer extends HTMLElement {
       case 'show-regions':
         this.#renderRegions()
         break
+      case 'hide-regions':
+        this.#hideRegionsInput.checked = value !== null
+        break
     }
   }
 
@@ -318,7 +326,7 @@ export class ElastishotViewer extends HTMLElement {
     const c = this.#tint
     const aligned = this.#aligned
     c.width = img.naturalWidth
-    c.height = aligned ? aligned.height : img.naturalHeight
+    c.height = aligned ? this.#alignedHeight(aligned) : img.naturalHeight
     const ctx = c.getContext('2d')
     if (!ctx) return
     ctx.globalCompositeOperation = 'source-over'
@@ -326,14 +334,18 @@ export class ElastishotViewer extends HTMLElement {
     ctx.fillRect(0, 0, c.width, c.height)
     ctx.globalCompositeOperation = 'difference'
     if (aligned) {
-      for (const s of aligned.segments) {
-        // Rows only one side has changed by definition: white under 'difference' turns black, the changed colour.
-        if (s.kind === 'inserted') {
-          ctx.fillRect(0, s.aligned.start, c.width, s.aligned.end - s.aligned.start)
-          continue
+      for (const lane of aligned) {
+        const x0 = lane.columns?.start ?? 0
+        const x1 = lane.columns?.end ?? c.width
+        for (const s of lane.layout.segments) {
+          // Rows only one side has changed by definition: white under 'difference' turns black, the changed colour.
+          if (s.kind === 'inserted') {
+            ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+            continue
+          }
+          const v = visibleRows(s, 'baseline', img.naturalHeight)
+          if (v) ctx.drawImage(img, x0, v.from, x1 - x0, v.count, x0, v.alignedStart, x1 - x0, v.count)
         }
-        const v = visibleRows(s, 'baseline', img.naturalHeight)
-        if (v) ctx.drawImage(img, 0, v.from, c.width, v.count, 0, v.alignedStart, c.width, v.count)
       }
     } else {
       ctx.drawImage(img, 0, 0)
@@ -350,18 +362,23 @@ export class ElastishotViewer extends HTMLElement {
    * section becomes a tinted gap on the baseline side, a deleted one a gap on
    * the candidate side, and the rows below them line up again.
    */
-  #alignedSpace(): AlignedLayout | null {
+  #alignedSpace(): LaneLayout[] | null {
     if (!this.hasAttribute('warped-src') || !this.#baselineLoaded || !this.#candidateLoaded) return null
     const bands = this.#alignment?.bandMap
     const bh = this.#baselineImg.naturalHeight
     const ch = this.#candidateImg.naturalHeight
     if (!bands?.length || !bh || !ch) return null
-    const layout = alignedLayout(bands, bh, ch)
-    return layout.hasGaps ? layout : null
+    const lanes = laneLayouts(bands, bh, ch)
+    return lanes.some((l) => l.layout.hasGaps) ? lanes : null
   }
 
-  #drawAligned(layout: AlignedLayout, w: number): void {
-    const key = `${this.#baselineImg.src}|${this.#candidateImg.src}|${w}|${layout.height}|${layout.segments.map((s) => `${s.kind}${s.aligned.start}`).join(',')}`
+  #alignedHeight(lanes: readonly LaneLayout[]): number {
+    return Math.max(...lanes.map((l) => l.layout.height))
+  }
+
+  #drawAligned(lanes: LaneLayout[], w: number): void {
+    const height = this.#alignedHeight(lanes)
+    const key = `${this.#baselineImg.src}|${this.#candidateImg.src}|${w}|${height}|${lanes.map((l) => `${l.columns?.start ?? ''}:${l.layout.segments.map((s) => `${s.kind}${s.aligned.start}`).join(',')}`).join(';')}`
     if (key === this.#alignedKey) return
     this.#alignedKey = key
     const styles = getComputedStyle(this)
@@ -369,19 +386,23 @@ export class ElastishotViewer extends HTMLElement {
     const gapRemoved = styles.getPropertyValue('--es-gap-removed').trim() || 'rgba(220, 38, 38, 0.12)'
     const draw = (canvas: HTMLCanvasElement, img: HTMLImageElement, side: 'baseline' | 'candidate', gap: string) => {
       canvas.width = w
-      canvas.height = layout.height
+      canvas.height = height
       const ctx = canvas.getContext('2d')
       if (!ctx) return
-      for (const s of layout.segments) {
-        const r = s[side]
-        if (r.end <= r.start) {
-          ctx.fillStyle = gap
-          ctx.fillRect(0, s.aligned.start, w, s.aligned.end - s.aligned.start)
-          continue
+      for (const lane of lanes) {
+        const x0 = lane.columns?.start ?? 0
+        const x1 = lane.columns?.end ?? w
+        for (const s of lane.layout.segments) {
+          const r = s[side]
+          if (r.end <= r.start) {
+            ctx.fillStyle = gap
+            ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+            continue
+          }
+          // A warp that cropped the candidate leaves rows outside the image; they stay blank.
+          const v = visibleRows(s, side, img.naturalHeight)
+          if (v) ctx.drawImage(img, x0, v.from, x1 - x0, v.count, x0, v.alignedStart, x1 - x0, v.count)
         }
-        // A warp that cropped the candidate leaves rows outside the image; they stay blank.
-        const v = visibleRows(s, side, img.naturalHeight)
-        if (v) ctx.drawImage(img, 0, v.from, img.naturalWidth, v.count, 0, v.alignedStart, w, v.count)
       }
     }
     draw(this.#baselineCanvas, this.#baselineImg, 'baseline', gapAdded)
@@ -410,7 +431,7 @@ export class ElastishotViewer extends HTMLElement {
     const changedSpace = Boolean(aligned) !== Boolean(this.#aligned)
     this.#aligned = aligned
     // Nothing is cut off: a warped candidate taller than the baseline extends the stage.
-    const h = aligned ? aligned.height : usingWarped ? Math.max(baselineH, this.#candidateImg.naturalHeight || 0) : baselineH
+    const h = aligned ? this.#alignedHeight(aligned) : usingWarped ? Math.max(baselineH, this.#candidateImg.naturalHeight || 0) : baselineH
     const zoom = this.getAttribute('zoom') ?? 'fit'
     const place = (s: number) => {
       this.#scale = s
@@ -571,6 +592,9 @@ export class ElastishotViewer extends HTMLElement {
     } else if (e.key === ' ' && this.mode === 'blink') {
       this.#setBlinkPaused(!this.#blinkPaused)
       e.preventDefault()
+    } else if (e.key === 'r') {
+      this.toggleAttribute('hide-regions')
+      e.preventDefault()
     } else if (e.key === 'Escape') {
       this.selectRegion(null)
     }
@@ -580,12 +604,13 @@ export class ElastishotViewer extends HTMLElement {
     const aligned = this.#aligned
     if (aligned) {
       // Added regions have a real box on the candidate side; in the common row space it is drawn in full.
-      if (r.boxBaseline) return mapBox(aligned, r.boxBaseline, 'baseline')
+      if (r.boxBaseline) return mapBox(laneFor(aligned, r.boxBaseline).layout, r.boxBaseline, 'baseline')
       if (r.boxCandidate) {
         // Candidate boxes are candidate pixels; the band map counts warped rows.
         const m = this.#alignment?.transform.m
         const warped = m ? applyToBox(m, r.boxCandidate) : r.boxCandidate
-        return mapBox(aligned, { x: Math.round(warped.x), y: Math.round(warped.y), w: Math.round(warped.w), h: Math.round(warped.h) }, 'candidate')
+        const box = { x: Math.round(warped.x), y: Math.round(warped.y), w: Math.round(warped.w), h: Math.round(warped.h) }
+        return mapBox(laneFor(aligned, box).layout, box, 'candidate')
       }
       return null
     }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import type { Band } from '../core/types.ts'
-import { alignedLayout, mapBox, mapY, visibleRows } from './bands.ts'
+import { alignedLayout, laneFor, laneLayouts, mapBox, mapY, visibleRows } from './bands.ts'
 
 const band = (kind: Band['kind'], b: [number, number], c: [number, number]): Band => ({
   kind,
@@ -75,4 +75,25 @@ test('rows outside the band map are matched in place and a map with no gaps chan
   const empty = alignedLayout([], 300, 300)
   assert.equal(empty.height, 300)
   assert.equal(mapY(empty, 299, 'baseline'), 299)
+})
+
+test('lane bands give each lane its own row space of one height, and boxes map through their lane', () => {
+  const lane = (kind: Band['kind'], b: [number, number], c: [number, number], columns: [number, number]): Band => ({ ...band(kind, b, c), columns: { start: columns[0], end: columns[1] } })
+  const bands: Band[] = [
+    band('matched', [0, 100], [0, 100]),
+    // left lane: 22 rows inserted at 120; right lane: the same 22 rows inserted at 300 (blank padding at the card's end)
+    lane('matched', [100, 120], [100, 120], [0, 400]),
+    lane('inserted', [120, 120], [120, 142], [0, 400]),
+    lane('matched', [120, 400], [142, 422], [0, 400]),
+    lane('matched', [100, 300], [100, 300], [400, 800]),
+    lane('inserted', [300, 300], [300, 322], [400, 800]),
+    lane('matched', [300, 400], [322, 422], [400, 800]),
+    band('matched', [400, 600], [422, 622]),
+  ]
+  const lanes = laneLayouts(bands, 600, 622)
+  assert.deepEqual(lanes.map((l) => [l.columns?.start, l.columns?.end, l.layout.height]), [[0, 400, 622], [400, 800, 622]])
+  // a box in the left lane below the insertion moves down, the same rows in the right lane do not
+  assert.deepEqual(mapBox(laneFor(lanes, { x: 50, y: 200, w: 100, h: 10 }).layout, { x: 50, y: 200, w: 100, h: 10 }, 'baseline'), { x: 50, y: 222, w: 100, h: 10 })
+  assert.deepEqual(mapBox(laneFor(lanes, { x: 450, y: 200, w: 100, h: 10 }).layout, { x: 450, y: 200, w: 100, h: 10 }, 'baseline'), { x: 450, y: 200, w: 100, h: 10 })
+  assert.equal(laneLayouts([band('matched', [0, 10], [0, 10])], 10, 10)[0]!.columns, null)
 })

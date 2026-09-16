@@ -127,9 +127,11 @@ export const verdictStage: Stage<ClassifyOutput, CompareResult> = {
     const toOriginalRows = (v: number) => Math.round(v / sB)
     const bandMap: Band[] = input.bands.map((b) => {
       const rows = b.baseline.end - b.baseline.start
-      if (b.kind === 'matched') structural.matchedRows += rows
-      else if (b.kind === 'deleted') structural.deletedRows += rows
-      else structural.insertedRows += b.candidate.end - b.candidate.start
+      // A lane band covers part of the width: it counts for that share of a row.
+      const share = b.columns ? (b.columns.end - b.columns.start) / Math.max(1, input.baseline.width) : 1
+      if (b.kind === 'matched') structural.matchedRows += rows * share
+      else if (b.kind === 'deleted') structural.deletedRows += rows * share
+      else structural.insertedRows += (b.candidate.end - b.candidate.start) * share
       return {
         kind: b.kind,
         axis: b.axis,
@@ -137,6 +139,7 @@ export const verdictStage: Stage<ClassifyOutput, CompareResult> = {
         candidate: { start: toOriginalRows(b.candidate.start), end: toOriginalRows(b.candidate.end) },
         similarity: b.similarity,
         offset: toOriginalRows(b.offset),
+        ...(b.columns ? { columns: { start: toOriginalRows(b.columns.start), end: toOriginalRows(b.columns.end) } } : {}),
       }
     })
     structural.matchedRows = toOriginalRows(structural.matchedRows)

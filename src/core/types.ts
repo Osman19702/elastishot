@@ -84,6 +84,12 @@ export interface Band {
   similarity: number
   /** candidate.start - baseline.start for matched bands. */
   offset: number
+  /**
+   * Columns the band applies to, when a stretch of the page was aligned lane
+   * by lane because side-by-side columns moved independently. Absent for a
+   * band that spans the full width.
+   */
+  columns?: Range
 }
 
 export interface AlignmentResult {

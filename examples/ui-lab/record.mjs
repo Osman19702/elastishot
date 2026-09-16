@@ -1,5 +1,5 @@
 /**
- * Record the walkthrough: the seven builds scrolling past, then the
+ * Record the walkthrough: the eight builds scrolling past, then the
  * Elastishot summary and three pair reports with the viewer in every mode.
  * Playwright writes a WebM; screenshots of each build and of the summary
  * page are taken on the way. Returns the file names relative to `outDir`.

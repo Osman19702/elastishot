@@ -186,7 +186,19 @@ export const diffStage: Stage<StructuralAlignOutput, DiffOutput> = {
         const cov = W.coverage.data.subarray(canvasRow * width, (canvasRow + rows) * width)
         return pixelDiff(a, b, width, rows, d.threshold, cov, radius)
       })
-      if (pd.changed === 0) return
+      // A lane band only speaks for its own columns; the rest of the row belongs to another lane's band.
+      let changed = pd.changed
+      if (band.columns) {
+        const { start: x0, end: x1 } = band.columns
+        changed = 0
+        for (let y = 0; y < rows; y++) {
+          const row = y * width
+          if (x0 > 0) pd.mask.fill(0, row, row + x0)
+          if (x1 < width) pd.mask.fill(0, row + x1, row + width)
+          for (let x = x0; x < x1; x++) if (pd.mask[row + x]) changed++
+        }
+      }
+      if (changed === 0) return
       if (ignoreB.length) zeroBoxes(pd.mask, width, rows, ignoreB, b0)
       if (ignoreW.length) zeroBoxes(pd.mask, width, rows, ignoreW, c0)
 
@@ -225,13 +237,15 @@ export const diffStage: Stage<StructuralAlignOutput, DiffOutput> = {
         const box = { ...local, y: local.y + b0 }
         found.push({ box, boxWarped: { ...box, y: box.y + band.offset }, band: bandIndex, pixels: area, deltaSum: deltaSum[l]! })
       }
-      const noisy = pd.changed / (width * rows) > NOISE_FRACTION && maxArea < NOISE_MAX_AREA && found.length > 0
+      const laneWidth = band.columns ? band.columns.end - band.columns.start : width
+      const noisy = changed / (laneWidth * rows) > NOISE_FRACTION && maxArea < NOISE_MAX_AREA && found.length > 0
       if (noisy) {
         ctx.warn('DIFF_LOW_TEXTURE_NOISE', 'a band differed only in scattered specks (font hinting or antialiasing); ignored', { band: bandIndex })
       } else {
         components.push(...found)
         const dst = rowRange(mats, diffMask, b0, b0 + rows)
-        maskMat.copyTo(dst)
+        // Lane bands share rows: their masks add up instead of replacing each other.
+        cv.bitwise_or(dst, maskMat, dst)
         mats.release(dst)
       }
       for (const m of [labels, stats, centroids, maskMat]) mats.release(m)

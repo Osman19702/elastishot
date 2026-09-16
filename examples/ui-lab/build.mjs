@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Write the seven builds of the Lumen page to examples/ui-lab/dist/build-<n>/
+ * Write the eight builds of the Lumen page to examples/ui-lab/dist/build-<n>/
  * and the ground truth to dist/changes.json.
  *
  *   node examples/ui-lab/build.mjs

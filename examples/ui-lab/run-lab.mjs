@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * The whole lab in one go:
- *   1. build the seven Lumen pages and serve them on http://127.0.0.1:4321
+ *   1. build the eight Lumen pages and serve them on http://127.0.0.1:4321
  *   2. approve build 1 as the baseline of every scenario (elastishot run --update)
  *   3. run the scenarios against their "after" builds (elastishot run)
  *   4. score the run against the ground truth (verify.mjs)

@@ -154,6 +154,7 @@ export interface CV {
   addWeighted(a: Mat, alpha: number, b: Mat, beta: number, gamma: number, dst: Mat, dtype: number): void
   threshold(src: Mat, dst: Mat, thresh: number, maxval: number, type: number): number
   morphologyEx(src: Mat, dst: Mat, op: number, kernel: Mat, anchor: Point, iterations: number, borderType: number, borderValue: Scalar): void
+  bitwise_or(src1: Mat, src2: Mat, dst: Mat): void
   morphologyDefaultBorderValue(): Scalar
   getStructuringElement(shape: number, ksize: Size, anchor: Point): Mat
   connectedComponentsWithStats(image: Mat, labels: Mat, stats: Mat, centroids: Mat, connectivity: number, ltype: number): number

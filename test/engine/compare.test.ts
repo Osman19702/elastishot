@@ -267,3 +267,34 @@ test('rows appended after look-alike rows are one added region after them, not a
   assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
   assert.equal(ofKind(r, 'removed').length, 0, describe(r))
 })
+
+test('two side-by-side columns: the left one gains a line, the right one is compared in place', async () => {
+  // A card with two text columns. The candidate inserts a line at the top of
+  // the left column and grows the card by that much; the right column keeps
+  // its rows. Row alignment alone cannot pair both columns at once.
+  const W = 800
+  const LINE = 22
+  const draw = (leftLines: number[], rightLines: number[]): RasterImage => {
+    const cardH = 40 + Math.max(leftLines.length, rightLines.length) * LINE + 40
+    const img = createImage(W, 96 + cardH + 48 + 48 + 40, [255, 255, 255, 255])
+    fillRect(img, { x: 0, y: 0, w: W, h: 56 }, [31, 41, 55, 255])
+    fillRect(img, { x: 24, y: 16, w: 120, h: 24 }, [37, 99, 235, 255])
+    fillRect(img, { x: 24, y: 96, w: W - 48, h: cardH }, [249, 250, 251, 255])
+    leftLines.forEach((wd, i) => fillRect(img, { x: 48, y: 136 + i * LINE, w: wd, h: 10 }, [55, 65, 81, 255]))
+    rightLines.forEach((wd, i) => fillRect(img, { x: 430, y: 136 + i * LINE, w: wd, h: 10 }, [55, 65, 81, 255]))
+    fillRect(img, { x: 0, y: 96 + cardH + 48, w: W, h: 48 }, [229, 231, 235, 255])
+    fillRect(img, { x: 24, y: 96 + cardH + 64, w: 200, h: 12 }, [107, 114, 128, 255])
+    return img
+  }
+  const left = [300, 260, 320, 240, 290, 310]
+  const right = [280, 330, 250, 300, 270]
+  const baseline = draw(left, right)
+  const candidate = draw([180, ...left], right)
+  const r = await engine.compare(baseline, candidate)
+  const added = ofKind(r, 'added')
+  assert.equal(added.length, 1, describe(r))
+  assert.ok(added[0]!.boxCandidate && added[0]!.boxCandidate.x < 400 && added[0]!.boxCandidate.y >= 120 && added[0]!.boxCandidate.y <= 160, describe(r))
+  assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
+  assert.equal(ofKind(r, 'removed').length, 0, describe(r))
+  assert.ok(r.alignment.bandMap.some((b) => b.columns), describe(r))
+})

@@ -1,5 +1,5 @@
 /**
- * "Lumen", a small product page rendered in seven builds. Build 1 is the
+ * "Lumen", a small product page rendered in eight builds. Build 1 is the
  * approved baseline; every later build changes the page in one family of
  * ways (new elements, text, shifts, expansions, images) or mixes them like
  * a real release. `BUILDS` is the ground truth the lab checks Elastishot
@@ -87,6 +87,13 @@ export const BUILDS = [
       { testid: 'cta', kind: 'changed', what: '"Start free" → "Get started"' },
     ],
   },
+  {
+    n: 8,
+    name: 'columns',
+    title: 'Build 8 — one column grows',
+    summary: 'The hero copy gains a sentence and wraps to one more line; the illustration beside it stays. Everything below the hero moves down, the buttons under the copy move within their column.',
+    expected: [{ testid: 'hero-copy', kind: 'changed', what: 'sentence appended, one more line' }],
+  },
 ]
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
@@ -130,10 +137,11 @@ export function render(n) {
   const expand = n === 5
   const images = n === 6
   const release = n === 7
+  const columns = n === 8
 
   const version = text ? 'v2.4.2' : release ? 'v2.5.0' : 'v2.4.1'
   const cta = text ? 'Start free trial' : release ? 'Get started' : 'Start free'
-  const heroCopy = `Lumen turns raw product events into answers your team can act on before the stand-up.${text ? ' Now with SSO.' : ''}`
+  const heroCopy = `Lumen turns raw product events into answers your team can act on before the stand-up.${text ? ' Now with SSO.' : ''}${columns ? ' Every dashboard is shareable with a link that respects your access rules.' : ''}`
   const teamPrice = text ? 39 : 29
   const uptime = text ? '99.99%' : '99.95%'
   const heroVariant = images ? 'b' : 'a'

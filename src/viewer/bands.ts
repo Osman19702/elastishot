@@ -67,6 +67,34 @@ export function alignedLayout(bands: readonly Band[], baselineHeight: number, ca
   return { height: a, segments, hasGaps: segments.some((s) => s.kind !== 'matched') }
 }
 
+/** One lane of the page with its own row space; `columns` is null when the whole width is one lane. */
+export interface LaneLayout {
+  columns: Range | null
+  layout: AlignedLayout
+}
+
+const sameRange = (a: Range | undefined, b: Range | undefined): boolean => a?.start === b?.start && a?.end === b?.end
+
+/**
+ * Bands with `columns` come from a stretch of the page aligned lane by lane.
+ * Each lane gets its own layout from the full-width bands plus its own;
+ * the layouts have one height, because every lane maps the same baseline
+ * rows to the same candidate rows.
+ */
+export function laneLayouts(bands: readonly Band[], baselineHeight: number, candidateHeight: number): LaneLayout[] {
+  const lanes: Range[] = []
+  for (const b of bands) if (b.columns && !lanes.some((l) => sameRange(l, b.columns))) lanes.push({ ...b.columns })
+  if (!lanes.length) return [{ columns: null, layout: alignedLayout(bands, baselineHeight, candidateHeight) }]
+  lanes.sort((a, b) => a.start - b.start)
+  return lanes.map((columns) => ({ columns, layout: alignedLayout(bands.filter((b) => !b.columns || sameRange(b.columns, columns)), baselineHeight, candidateHeight) }))
+}
+
+/** The lane a box belongs to: the one holding its centre column. */
+export function laneFor(lanes: readonly LaneLayout[], box: Box): LaneLayout {
+  const cx = box.x + box.w / 2
+  return lanes.find((l) => l.columns && cx >= l.columns.start && cx < l.columns.end) ?? lanes[0]!
+}
+
 /** The part of a segment's rows on one side that exists in an image of the given height, with where it lands. */
 export function visibleRows(segment: AlignedSegment, side: AlignedSide, imageHeight: number): { from: number; count: number; alignedStart: number } | null {
   const r = segment[side]
