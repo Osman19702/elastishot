@@ -77,6 +77,26 @@ test('rows outside the band map are matched in place and a map with no gaps chan
   assert.equal(mapY(empty, 299, 'baseline'), 299)
 })
 
+test('gaps are numbered in band-map order across lanes, so each finds its row of the gaps image', () => {
+  const left = { start: 0, end: 500 }
+  const right = { start: 500, end: 1000 }
+  const bands: Band[] = [
+    band('matched', [0, 100], [0, 100]),
+    { ...band('inserted', [100, 100], [100, 130]), columns: left },
+    { ...band('matched', [100, 200], [130, 230]), columns: left },
+    { ...band('matched', [100, 190], [100, 190]), columns: right },
+    { ...band('deleted', [190, 200], [190, 190]), columns: right },
+    { ...band('inserted', [200, 200], [190, 230]), columns: right },
+    band('matched', [200, 300], [230, 330]),
+  ]
+  const lanes = laneLayouts(bands, 300, 330)
+  const gaps = lanes.map((l) => l.layout.segments.filter((s) => s.kind !== 'matched').map((s) => `${s.kind[0]}${s.gap}`))
+  assert.deepEqual(gaps, [['i0'], ['d1', 'i2']])
+  // a plain layout numbers its gaps too; matched rows carry no number
+  const plain = alignedLayout([band('matched', [0, 50], [0, 50]), band('inserted', [50, 50], [50, 70]), band('matched', [50, 100], [70, 120])], 100, 120)
+  assert.deepEqual(plain.segments.map((s) => s.gap), [undefined, 0, undefined])
+})
+
 test('lane bands give each lane its own row space of one height, and boxes map through their lane', () => {
   const lane = (kind: Band['kind'], b: [number, number], c: [number, number], columns: [number, number]): Band => ({ ...band(kind, b, c), columns: { start: columns[0], end: columns[1] } })
   const bands: Band[] = [

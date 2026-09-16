@@ -13,7 +13,7 @@ import type { Band, Box } from '../../core/types.ts'
 import type { Mat } from '../cv/cv-types.ts'
 import { colEnergy, edgeMagnitude, roi, rowEnergy } from '../cv/ops.ts'
 import type { GlobalAlignOutput, StructuralAlignOutput, Warped, WorkingRegion } from '../model.ts'
-import { conflictZones, foldWobble, GUTTER_EDGE_SHARE, laneTiles } from '../pure/lanes.ts'
+import { conflictZones, foldWobble, GUTTER_EDGE_SHARE, laneTiles, mergeContiguous, splitSubstitutedEdges } from '../pure/lanes.ts'
 import { alignRows, hashRow, NO_ROW } from '../pure/row-align.ts'
 import { gapScore } from '../pure/scoring.ts'
 import { alignSequences, MAX_CELLS, opsToRuns, repairSubstitutions, type Run } from '../pure/sequence-align.ts'
@@ -167,7 +167,10 @@ function flatRow(gray: Uint8Array, start: number, end: number): number {
  * hash sequences are aligned like lines of text. Null when the candidate
  * covers too little of the canvas to say anything.
  */
-function exactRowBands(input: GlobalAlignOutput): Band[] | null {
+/** Whether baseline row y pairs exactly with the candidate row at an offset, by the row hashes. */
+type RowExact = (baselineRow: number, offset: number) => boolean
+
+function exactRowBands(input: GlobalAlignOutput): { bands: Band[]; exact: RowExact } | null {
   const B = input.baseline
   const W = input.warped
   const pad = W.padTop
@@ -224,7 +227,7 @@ function exactRowBands(input: GlobalAlignOutput): Band[] | null {
   }
   while (runs.length > 1 && flatRun(runs[0]!)) runs.shift()
   while (runs.length > 1 && flatRun(runs[runs.length - 1]!)) runs.pop()
-  return runs.map((r): Band => {
+  const bands = runs.map((r): Band => {
     const baseline = { start: r.b0, end: r.b1 }
     const candidate = { start: cTop + r.c0 - pad, end: cTop + r.c1 - pad }
     let similarity = 0
@@ -235,6 +238,21 @@ function exactRowBands(input: GlobalAlignOutput): Band[] | null {
     }
     return { kind: r.kind, axis: 'y', baseline, candidate, similarity, offset: candidate.start - baseline.start }
   })
+  const exact: RowExact = (y, offset) => {
+    const k = y + offset + pad - cTop
+    return y >= 0 && y < B.height && k >= 0 && k < nC && hashA[y] === hashB[k]
+  }
+  return { bands, exact }
+}
+
+/** The columns the candidate covers on a canvas row, from the coverage mask: [x0, x1). */
+function coveredColumns(cov: Uint8Array, width: number, row: number): [number, number] {
+  const base = Math.max(0, row) * width
+  let x0 = 0
+  while (x0 < width && cov[base + x0] !== 255) x0++
+  let x1 = width
+  while (x1 > x0 && cov[base + x1 - 1] !== 255) x1--
+  return [x0, x1]
 }
 
 /** Hash rows [y0, y1) of one side over columns [x0, x1); canvas rows not fully covered hash as NO_ROW. */
@@ -267,9 +285,10 @@ function laneHashes(rgba: Uint8Array, gray: Uint8Array, width: number, y0: numbe
  * they pair at least as many content cells exactly. Everything outside the
  * zones keeps its full-width bands.
  */
-function laneAlign(input: GlobalAlignOutput, bands: Band[], edges: { baseline: Mat; warped: Mat }, stripPx: number, debug?: (...args: unknown[]) => void): Band[] {
-  const zones = conflictZones(bands)
-  if (!zones.length) return bands
+const bandTag = (b: Band): string => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}~${b.similarity.toFixed(2)}${b.columns ? `[${b.columns.start}-${b.columns.end}]` : ''}`
+
+function laneAlign(input: GlobalAlignOutput, rowBands: Band[], exact: RowExact, edges: { baseline: Mat; warped: Mat }, stripPx: number, debug?: (...args: unknown[]) => void): Band[] {
+  if (!rowBands.some((b) => b.kind !== 'matched')) return rowBands
   const B = input.baseline
   const W = input.warped
   const pad = W.padTop
@@ -281,6 +300,12 @@ function laneAlign(input: GlobalAlignOutput, bands: Band[], edges: { baseline: M
   const cov = W.coverage.data
   const blurB = B.grayBlur.data
   const blurW = W.grayBlur.data
+  // The rows beside a gap that paired inexactly belong to the zone; the
+  // row alignment's own hashes say which rows those are.
+  const bands = splitSubstitutedEdges(rowBands, exact)
+  const zones = conflictZones(bands)
+  if (debug && bands.length !== rowBands.length) debug('split', { before: rowBands.map(bandTag), after: bands.map(bandTag), zones })
+  if (!zones.length) return rowBands
   const out: Band[] = []
   let cursor = 0
   for (const zone of zones) {
@@ -289,9 +314,14 @@ function laneAlign(input: GlobalAlignOutput, bands: Band[], edges: { baseline: M
     const zoneBands = bands.slice(zone.from, zone.to)
     const z0 = Math.max(0, Math.min(...zoneBands.map((b) => b.baseline.start)))
     const z1 = Math.min(B.height, Math.max(...zoneBands.map((b) => b.baseline.end)))
-    const c0 = Math.max(-pad, Math.min(...zoneBands.map((b) => b.candidate.start)))
-    const c1 = Math.min(W.height - pad, Math.max(...zoneBands.map((b) => b.candidate.end)))
-    if (z1 - z0 < 2 || c1 - c0 < 2) {
+    // The candidate's rows and columns on the canvas come from the warp's
+    // extent, not from the coverage mask: the mask is eroded, and a lane
+    // whose last rows hash as uncovered never trims its blank suffix, so an
+    // insertion above it slides to the lane's bottom.
+    const c0 = Math.max(Math.ceil(W.extent.top), Math.min(...zoneBands.map((b) => b.candidate.start)))
+    const c1 = Math.min(Math.floor(W.extent.bottom), W.height - pad, Math.max(...zoneBands.map((b) => b.candidate.end)))
+    const [cx0, cx1] = coveredColumns(cov, width, ((c0 + c1) >> 1) + pad)
+    if (z1 - z0 < 2 || c1 - c0 < 2 || cx1 - cx0 < 2) {
       out.push(...zoneBands)
       continue
     }
@@ -319,8 +349,11 @@ function laneAlign(input: GlobalAlignOutput, bands: Band[], edges: { baseline: M
     }
     const laneBands: Band[] = []
     for (const tile of tiles) {
-      const a = laneHashes(rgbaB, grayB, width, z0, z1, tile.start, tile.end, null)
-      const b = laneHashes(rgbaW, grayW, width, c0 + pad, c1 + pad, tile.start, tile.end, cov)
+      // Hash only the columns the candidate covers; the tile keeps its full width.
+      const x0 = Math.max(tile.start, cx0)
+      const x1 = Math.max(x0, Math.min(tile.end, cx1))
+      const a = laneHashes(rgbaB, grayB, width, z0, z1, x0, x1, null)
+      const b = laneHashes(rgbaW, grayW, width, c0 + pad, c1 + pad, x0, x1, null)
       const runs = alignRows({ a: a.hashes, b: b.hashes, blankA: a.blank, blankB: b.blank })
       const tileBands: Band[] = []
       for (const r of runs) {
@@ -345,7 +378,7 @@ function laneAlign(input: GlobalAlignOutput, bands: Band[], edges: { baseline: M
     else out.push(...zoneBands)
   }
   out.push(...bands.slice(cursor))
-  return out
+  return mergeContiguous(out)
 }
 
 interface Signatures {
@@ -926,14 +959,14 @@ export const structuralAlignStage: Stage<GlobalAlignOutput, StructuralAlignOutpu
     // above a block. The exact-cell count arbitrates, so a row alignment
     // that explains fewer pixels than the strips never replaces them.
     if (exactCapable(input)) {
-      const rowBands = ctx.time('rowAlign', () => exactRowBands(input))
-      if (rowBands && rowBands.length) {
+      const rowAlign = ctx.time('rowAlign', () => exactRowBands(input))
+      if (rowAlign && rowAlign.bands.length) {
         const rowWarnings: Array<() => void> = []
         const dbg = debugSink()
         // Side-by-side columns that moved on their own leave the row bands in
         // a tangle the strips may beat; the lanes untangle it first, so the
         // arbitration sees the row alignment at its best.
-        const refined = laneAlign(input, refineOffsets(dropCroppedEdges(buffered(rowWarnings), rowBands, B.height, W), B, W, stripPx, true), edges, stripPx, dbg)
+        const refined = laneAlign(input, refineOffsets(dropCroppedEdges(buffered(rowWarnings), rowAlign.bands, B.height, W), B, W, stripPx, true), rowAlign.exact, edges, stripPx, dbg)
         const grayB = B.grayBlur.data
         const grayW = W.grayBlur.data
         const viaRows = exactContentCells(refined, grayB, grayW, B.width, B.height, W.height, pad)

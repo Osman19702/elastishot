@@ -25,6 +25,8 @@ export interface AlignedSegment {
   baseline: Range
   candidate: Range
   aligned: Range
+  /** For a gap: its index among the band map's inserted and deleted bands, the row of the gaps image that fills it. */
+  gap?: number
 }
 
 export interface AlignedLayout {
@@ -36,22 +38,29 @@ export interface AlignedLayout {
 
 const len = (r: Range): number => Math.max(0, r.end - r.start)
 
+/** Each inserted or deleted band's index among the gaps, in band-map order: the engine's gaps image has one row per gap in that order. */
+export function gapIndex(bands: readonly Band[]): Map<Band, number> {
+  const index = new Map<Band, number>()
+  for (const b of bands) if (b.kind !== 'matched') index.set(b, index.size)
+  return index
+}
+
 /**
  * Lay the y-axis bands out end to end. Rows before the first band and after
  * the last one are matched, so a band map that does not cover the whole
  * image still maps every row.
  */
-export function alignedLayout(bands: readonly Band[], baselineHeight: number, candidateHeight: number): AlignedLayout {
+export function alignedLayout(bands: readonly Band[], baselineHeight: number, candidateHeight: number, gaps: ReadonlyMap<Band, number> = gapIndex(bands)): AlignedLayout {
   const rows = bands.filter((b) => b.axis === 'y').slice()
   rows.sort((a, b) => a.baseline.start - b.baseline.start || a.candidate.start - b.candidate.start)
   const segments: AlignedSegment[] = []
   let a = 0
   let b = 0
   let c = 0
-  const push = (kind: Band['kind'], baseline: Range, candidate: Range) => {
+  const push = (kind: Band['kind'], baseline: Range, candidate: Range, gap?: number) => {
     const n = kind === 'inserted' ? len(candidate) : len(baseline)
     if (n <= 0) return
-    segments.push({ kind, baseline, candidate, aligned: { start: a, end: a + n } })
+    segments.push({ kind, baseline, candidate, aligned: { start: a, end: a + n }, ...(gap === undefined ? {} : { gap }) })
     a += n
     b = Math.max(b, baseline.end)
     c = Math.max(c, candidate.end)
@@ -60,7 +69,7 @@ export function alignedLayout(bands: readonly Band[], baselineHeight: number, ca
     // Rows neither side reported are compared in place.
     const lead = Math.max(band.baseline.start - b, band.candidate.start - c)
     if (lead > 0) push('matched', { start: b, end: b + lead }, { start: c, end: c + lead })
-    push(band.kind, band.baseline, band.candidate)
+    push(band.kind, band.baseline, band.candidate, gaps.get(band))
   }
   const tail = Math.max(baselineHeight - b, candidateHeight - c)
   if (tail > 0) push('matched', { start: b, end: b + tail }, { start: c, end: c + tail })
@@ -84,9 +93,10 @@ const sameRange = (a: Range | undefined, b: Range | undefined): boolean => a?.st
 export function laneLayouts(bands: readonly Band[], baselineHeight: number, candidateHeight: number): LaneLayout[] {
   const lanes: Range[] = []
   for (const b of bands) if (b.columns && !lanes.some((l) => sameRange(l, b.columns))) lanes.push({ ...b.columns })
-  if (!lanes.length) return [{ columns: null, layout: alignedLayout(bands, baselineHeight, candidateHeight) }]
+  const gaps = gapIndex(bands)
+  if (!lanes.length) return [{ columns: null, layout: alignedLayout(bands, baselineHeight, candidateHeight, gaps) }]
   lanes.sort((a, b) => a.start - b.start)
-  return lanes.map((columns) => ({ columns, layout: alignedLayout(bands.filter((b) => !b.columns || sameRange(b.columns, columns)), baselineHeight, candidateHeight) }))
+  return lanes.map((columns) => ({ columns, layout: alignedLayout(bands.filter((b) => !b.columns || sameRange(b.columns, columns)), baselineHeight, candidateHeight, gaps) }))
 }
 
 /** The lane a box belongs to: the one holding its centre column. */

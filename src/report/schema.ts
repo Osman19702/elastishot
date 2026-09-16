@@ -21,6 +21,8 @@ export interface PairArtifacts {
   overlay?: string
   warped?: string
   candidateOverlay?: string
+  /** One row per gap of the band map: what the viewer paints under it (artifacts.gapFills). */
+  gaps?: string
   /** Small inline previews for the summary page. */
   thumbs?: { baseline?: string; candidate?: string; diff?: string }
   /** The detailed page for this pair, relative to the summary page. */

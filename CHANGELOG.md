@@ -6,6 +6,29 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-16
+
+### Fixed
+
+- Two lines of a card's left column changed and two were added while the
+  right column stayed: the full-width row alignment paired the changed lines
+  and the paragraph below them with the wrong rows and put the insertion two
+  paragraphs too low, so the paragraph was reported as changed and the viewer
+  showed the gap in the wrong place. The rows beside a gap that did not pair
+  exactly now belong to the lane zone, and each column is aligned on its own
+  from there: the changed lines are one region, the added lines another, and
+  the rows below line up. A lane's rows are now hashed over the rows and
+  columns the warp actually covers: the coverage mask is eroded at the
+  edges, so a lane's last rows never matched and an insertion above them
+  slid to the bottom of the lane.
+- The viewer continued the row next to a gap under the gap's tint, which on
+  a line of text drew a barcode. Each column of a gap now shows the colour
+  it shows most often in the 48 rows on either side (page and card
+  backgrounds stay, text goes). The engine writes those colours as
+  `gaps.png`, one row per gap, and the pair page passes it as `gaps-src`, so
+  a report opened from `file://`, where the browser refuses pixel reads,
+  draws the same fill.
+
 ## [0.1.6] - 2026-09-16
 
 ### Fixed
@@ -144,7 +167,8 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/Osman19702/elastishot/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Osman19702/elastishot/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Osman19702/elastishot/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/Osman19702/elastishot/compare/v0.1.3...v0.1.4

@@ -59,6 +59,7 @@ export async function writePairArtifacts(runDir: string, input: PairWriteInput, 
     ['overlay.png', input.result?.artifacts.overlay, undefined],
     ['warped.png', input.result?.artifacts.warpedCandidate, undefined],
     ['candidate-overlay.png', input.result?.artifacts.candidateOverlay, undefined],
+    ['gaps.png', input.result?.artifacts.gapFills, undefined],
   ]
   for (const [file, image, bytes] of images) {
     if (!image) continue
@@ -82,6 +83,7 @@ export async function writePairArtifacts(runDir: string, input: PairWriteInput, 
     ...(refs['overlay.png'] ? { overlay: refs['overlay.png'] } : {}),
     ...(refs['warped.png'] ? { warped: refs['warped.png'] } : {}),
     ...(refs['candidate-overlay.png'] ? { candidateOverlay: refs['candidate-overlay.png'] } : {}),
+    ...(refs['gaps.png'] ? { gaps: refs['gaps.png'] } : {}),
     thumbs: {
       baseline: thumbnail(input.baseline.image, thumbWidth),
       candidate: thumbnail(input.candidate.image, thumbWidth),
@@ -130,6 +132,7 @@ export async function writePairArtifacts(runDir: string, input: PairWriteInput, 
       ...(artifacts.overlay ? { overlay: local(artifacts.overlay) } : {}),
       ...(artifacts.warped ? { warped: local(artifacts.warped) } : {}),
       ...(artifacts.candidateOverlay ? { candidateOverlay: local(artifacts.candidateOverlay) } : {}),
+      ...(artifacts.gaps ? { gaps: local(artifacts.gaps) } : {}),
     },
   }
   await writeFile(path.join(dir, 'report.html'), renderPairReport(forPage))

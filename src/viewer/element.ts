@@ -1,7 +1,7 @@
 /**
  * <elastishot-viewer>: compare two images in place.
  *
- * Attributes: baseline-src, candidate-src, diff-src, warped-src, mode
+ * Attributes: baseline-src, candidate-src, diff-src, warped-src, gaps-src, mode
  * (slider | flip | blink | overlay | diff), position (0-100),
  * opacity (0-1), flip-side (baseline | candidate), blink-ms, zoom (fit | number),
  * show-regions, hide-regions (hides the region boxes in every mode; the
@@ -19,6 +19,7 @@
 import type { AlignmentResult, Box, DiffRegion } from '../core/types.ts'
 import type { LocatorReport, RegionLocators } from '../locators/index.ts'
 import { laneFor, laneLayouts, mapBox, visibleRows, type LaneLayout } from './bands.ts'
+import { pickGapFill } from './gap-fill.ts'
 import { VIEWER_CSS } from './styles.ts'
 import { MODES, viewerTemplate, type ViewerMode } from './template.ts'
 import { applyToBox, matrixToCss } from './transform.ts'
@@ -34,7 +35,7 @@ export interface ViewerData {
 
 export class ElastishotViewer extends HTMLElement {
   static get observedAttributes(): string[] {
-    return ['baseline-src', 'candidate-src', 'diff-src', 'warped-src', 'mode', 'position', 'opacity', 'flip-side', 'blink-ms', 'zoom', 'show-regions', 'hide-regions']
+    return ['baseline-src', 'candidate-src', 'diff-src', 'warped-src', 'gaps-src', 'mode', 'position', 'opacity', 'flip-side', 'blink-ms', 'zoom', 'show-regions', 'hide-regions']
   }
 
   #regions: DiffRegion[] = []
@@ -49,6 +50,8 @@ export class ElastishotViewer extends HTMLElement {
   #observer: ResizeObserver | null = null
   #baselineLoaded = false
   #candidateLoaded = false
+  #gapsImg: HTMLImageElement | null = null
+  #gapsUrl: string | null = null
   #objectUrls: string[] = []
   #initialized = false
   /** The common row space per lane when the band map has inserted or deleted rows; null draws the images as they are. */
@@ -228,6 +231,7 @@ export class ElastishotViewer extends HTMLElement {
       case 'baseline-src':
       case 'candidate-src':
       case 'warped-src':
+      case 'gaps-src':
       case 'diff-src':
         this.#applySources()
         break
@@ -295,6 +299,27 @@ export class ElastishotViewer extends HTMLElement {
     }
     if (!candidate) this.#candidateLoaded = true
     if (diff !== this.#diffUrl) this.#loadDiff(diff)
+    const gaps = this.getAttribute('gaps-src')
+    if (gaps !== this.#gapsUrl) this.#loadGaps(gaps)
+  }
+
+  /**
+   * The gaps image (the engine's artifacts.gapFills): one row per inserted
+   * or deleted band, the colours to continue under that gap. Drawn as an
+   * image, so it needs no pixel reads, which a file:// report is denied.
+   */
+  #loadGaps(url: string | null): void {
+    this.#gapsUrl = url
+    this.#gapsImg = null
+    if (!url) return
+    const img = new Image()
+    img.onload = () => {
+      if (this.#gapsUrl !== url) return
+      this.#gapsImg = img
+      this.#alignedKey = ''
+      this.#layout()
+    }
+    img.src = url
   }
 
   /**
@@ -378,7 +403,7 @@ export class ElastishotViewer extends HTMLElement {
 
   #drawAligned(lanes: LaneLayout[], w: number): void {
     const height = this.#alignedHeight(lanes)
-    const key = `${this.#baselineImg.src}|${this.#candidateImg.src}|${w}|${height}|${lanes.map((l) => `${l.columns?.start ?? ''}:${l.layout.segments.map((s) => `${s.kind}${s.aligned.start}`).join(',')}`).join(';')}`
+    const key = `${this.#baselineImg.src}|${this.#candidateImg.src}|${this.#gapsImg?.src ?? ''}|${w}|${height}|${lanes.map((l) => `${l.columns?.start ?? ''}:${l.layout.segments.map((s) => `${s.kind}${s.aligned.start}`).join(',')}`).join(';')}`
     if (key === this.#alignedKey) return
     this.#alignedKey = key
     const styles = getComputedStyle(this)
@@ -389,6 +414,17 @@ export class ElastishotViewer extends HTMLElement {
       canvas.height = height
       const ctx = canvas.getContext('2d')
       if (!ctx) return
+      let pixels: CanvasRenderingContext2D | null | undefined
+      const source = (): CanvasRenderingContext2D | null => {
+        if (pixels === undefined) {
+          const off = document.createElement('canvas')
+          off.width = img.naturalWidth
+          off.height = img.naturalHeight
+          pixels = off.getContext('2d', { willReadFrequently: true })
+          pixels?.drawImage(img, 0, 0)
+        }
+        return pixels
+      }
       for (const lane of lanes) {
         const x0 = lane.columns?.start ?? 0
         const x1 = lane.columns?.end ?? w
@@ -396,13 +432,42 @@ export class ElastishotViewer extends HTMLElement {
         segments.forEach((s, i) => {
           const r = s[side]
           if (r.end <= r.start) {
-            // A gap has no pixels of its own: continue the row just outside it
-            // (stretched over the gap) so a dark page stays dark under the tint,
-            // instead of the viewer's background showing through as a bar.
+            // A gap has no pixels of its own. The viewer's background showing
+            // through would be a bright bar on a dark page, and the row next
+            // to the gap stretched over it is a barcode when that row holds
+            // text, so every column continues the colour it shows most often
+            // in the rows around the gap, see gap-fill.ts.
+            const strip = this.#gapsImg
+            if (strip && s.gap !== undefined && s.gap < strip.naturalHeight) {
+              const sx = strip.naturalWidth / Math.max(1, img.naturalWidth)
+              ctx.drawImage(strip, Math.round(x0 * sx), s.gap, Math.max(1, Math.round((x1 - x0) * sx)), 1, x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+              ctx.fillStyle = gap
+              ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+              return
+            }
             const before = segments.slice(0, i).reverse().find((o) => o[side].end > o[side].start)
             const after = segments.slice(i + 1).find((o) => o[side].end > o[side].start)
-            const rowY = before ? Math.min(img.naturalHeight - 1, Math.max(0, before[side].end - 1)) : after ? Math.min(img.naturalHeight - 1, Math.max(0, after[side].start)) : -1
-            if (rowY >= 0) ctx.drawImage(img, x0, rowY, x1 - x0, 1, x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+            const px = source()
+            const lane = Math.max(1, x1 - x0)
+            const fill = pickGapFill((y) => {
+              if (!px || y < 0 || y >= img.naturalHeight) return null
+              try {
+                return px.getImageData(x0, y, lane, 1).data
+              } catch {
+                return null
+              }
+            }, img.naturalHeight, before ? before[side].end - 1 : -1, after ? after[side].start : -1)
+            if (fill.kind === 'row') ctx.drawImage(img, x0, fill.y, x1 - x0, 1, x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+            else if (fill.kind === 'colours') {
+              const strip = document.createElement('canvas')
+              strip.width = lane
+              strip.height = 1
+              const sctx = strip.getContext('2d')
+              if (sctx) {
+                sctx.putImageData(new ImageData(fill.data, lane, 1), 0, 0)
+                ctx.drawImage(strip, 0, 0, lane, 1, x0, s.aligned.start, lane, s.aligned.end - s.aligned.start)
+              }
+            }
             ctx.fillStyle = gap
             ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
             return

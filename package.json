@@ -1,6 +1,6 @@
 {
   "name": "elastishot",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Elastic screenshot comparison for UI change detection: align two screenshots or URLs with feature analysis, then report the regions and DOM locators that changed.",
   "author": "Osman Turalioglu",
   "repository": {

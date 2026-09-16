@@ -84,6 +84,88 @@ export function foldWobble(bands: readonly Band[]): Band[] {
   return out
 }
 
+/** A run of this many exactly paired rows settles where a substituted stretch ends. */
+export const SETTLED_ROWS = 24
+
+/**
+ * The full-width row alignment keeps rows it could not pair exactly inside
+ * the matched band at the same offset. Next to a gap that is where a lane
+ * moved on its own: the left column's lines sit against the right column's
+ * unchanged rows, so no row hashes equal. Such a stretch at the edge of a
+ * band beside a gap is split off (as a band of its own, with its exact
+ * share as similarity) so that the zone can take it; `exact(row, offset)`
+ * says whether a baseline row pairs exactly at an offset. Lane bands and
+ * bands not beside a gap are left alone.
+ */
+export function splitSubstitutedEdges(bands: readonly Band[], exact: (baselineRow: number, offset: number) => boolean): Band[] {
+  const out: Band[] = []
+  bands.forEach((b, i) => {
+    if (b.kind !== 'matched' || b.columns || b.similarity >= 1) {
+      out.push({ ...b })
+      return
+    }
+    const prev = bands[i - 1]
+    const next = bands[i + 1]
+    let head = b.baseline.start
+    let tail = b.baseline.end
+    if (prev && prev.kind !== 'matched') {
+      let run = 0
+      let lastBad = -1
+      for (let y = b.baseline.start; y < b.baseline.end && run < SETTLED_ROWS; y++) {
+        if (exact(y, b.offset)) run++
+        else {
+          run = 0
+          lastBad = y
+        }
+      }
+      if (lastBad >= 0) head = lastBad + 1
+    }
+    if (next && next.kind !== 'matched') {
+      let run = 0
+      let lastBad = -1
+      for (let y = b.baseline.end - 1; y >= head && run < SETTLED_ROWS; y--) {
+        if (exact(y, b.offset)) run++
+        else {
+          run = 0
+          lastBad = y
+        }
+      }
+      if (lastBad >= 0) tail = lastBad
+    }
+    const piece = (start: number, end: number): Band => {
+      let same = 0
+      for (let y = start; y < end; y++) if (exact(y, b.offset)) same++
+      return { ...b, baseline: { start, end }, candidate: { start: start + b.offset, end: end + b.offset }, similarity: same / Math.max(1, end - start) }
+    }
+    if (head >= tail) {
+      out.push(piece(b.baseline.start, b.baseline.end))
+      return
+    }
+    if (head > b.baseline.start) out.push(piece(b.baseline.start, head))
+    out.push(piece(head, tail))
+    if (tail < b.baseline.end) out.push(piece(tail, b.baseline.end))
+  })
+  return out
+}
+
+/** Undo a split that no zone used: contiguous full-width matched bands at one offset are one band again. */
+export function mergeContiguous(bands: readonly Band[]): Band[] {
+  const out: Band[] = []
+  for (const b of bands) {
+    const prev = out[out.length - 1]
+    if (prev && prev.kind === 'matched' && b.kind === 'matched' && !prev.columns && !b.columns && prev.offset === b.offset && prev.baseline.end === b.baseline.start) {
+      const n1 = prev.baseline.end - prev.baseline.start
+      const n2 = b.baseline.end - b.baseline.start
+      prev.baseline = { start: prev.baseline.start, end: b.baseline.end }
+      prev.candidate = { start: prev.candidate.start, end: b.candidate.end }
+      prev.similarity = (prev.similarity * n1 + b.similarity * n2) / Math.max(1, n1 + n2)
+      continue
+    }
+    out.push({ ...b })
+  }
+  return out
+}
+
 export interface Zone {
   /** Band indices [from, to). */
   from: number

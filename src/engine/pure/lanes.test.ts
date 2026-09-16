@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import type { Band, Range } from '../../core/types.ts'
-import { conflictZones, foldWobble, laneTiles } from './lanes.ts'
+import { conflictZones, foldWobble, laneTiles, mergeContiguous, splitSubstitutedEdges } from './lanes.ts'
 
 const band = (kind: Band['kind'], b0: number, b1: number, offset = 0, similarity = kind === 'matched' ? 1 : 0): Band => ({
   kind,
@@ -53,6 +53,37 @@ test('one gap next to a substituted stretch is a zone too', () => {
 test('short exact bands do not end a zone', () => {
   const bands = [band('matched', 0, 500), band('inserted', 500, 500), band('matched', 500, 520, 22), band('deleted', 520, 540, 22), band('matched', 540, 900, 0)]
   assert.deepEqual(conflictZones(bands), [{ from: 1, to: 4 }])
+})
+
+test('the inexact rows beside a gap are split off so the zone can take them', () => {
+  // the portfolio card: two lines of the left column changed and two were added, the
+  // right column stayed. Full-width rows pair exactly up to row 2455, then none do
+  // until the gap; below the gap every row pairs at the new offset.
+  const bands = [band('matched', 0, 2543, 0, 0.95), band('inserted', 2543, 2543), band('matched', 2543, 2913, 43)]
+  const exact = (y: number, offset: number) => (offset === 0 ? y < 2455 || (y >= 2470 && y < 2478) : true)
+  const split = splitSubstitutedEdges(bands, exact)
+  assert.deepEqual(split.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}`), ['m0-2455@0', 'm2455-2543@0', 'i2543-2543@0', 'm2543-2913@43'])
+  assert.equal(split[0]!.similarity, 1)
+  assert.ok(split[1]!.similarity < 0.2, String(split[1]!.similarity))
+  // the zone now starts at the changed lines, not at the gap
+  assert.deepEqual(conflictZones(split), [{ from: 1, to: 3 }])
+  // a band after a gap loses its inexact head the same way
+  const after = [band('inserted', 0, 0), band('matched', 0, 500, 22, 0.9), band('matched', 500, 900, 22)]
+  const head = splitSubstitutedEdges(after, (y) => y >= 60)
+  assert.deepEqual(head.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}`), ['i0-0@0', 'm0-60@22', 'm60-500@22', 'm500-900@22'])
+  // bands not beside a gap, exact bands and lane bands are left alone
+  const alone = [band('matched', 0, 100, 0, 0.5), { ...band('matched', 100, 200, 0, 0.5), columns: { start: 0, end: 300 } }, band('inserted', 200, 200), band('matched', 200, 300)]
+  assert.deepEqual(splitSubstitutedEdges(alone, () => false).map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}`), ['m0-100', 'm100-200', 'i200-200', 'm200-300'])
+})
+
+test('a split no zone used is merged back into one band', () => {
+  const pieces = [band('matched', 0, 2455, 0, 1), band('matched', 2455, 2543, 0, 0.1), band('inserted', 2543, 2543), band('matched', 2543, 2913, 43)]
+  const merged = mergeContiguous(pieces)
+  assert.deepEqual(merged.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}`), ['m0-2543@0', 'i2543-2543@0', 'm2543-2913@43'])
+  assert.ok(Math.abs(merged[0]!.similarity - (2455 + 88 * 0.1) / 2543) < 1e-9)
+  // lane bands and bands at different offsets stay apart
+  const apart = [band('matched', 0, 100), { ...band('matched', 100, 200), columns: { start: 0, end: 300 } }, band('matched', 200, 300, 1)]
+  assert.equal(mergeContiguous(apart).length, 3)
 })
 
 test('lanes tile the width down the middle of each gutter', () => {

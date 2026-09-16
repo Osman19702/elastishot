@@ -3,7 +3,8 @@
  * pass/fail and assemble the result with its artifacts.
  */
 import { clampBox, decompose, makeTransform } from '../../core/geometry.ts'
-import { cloneImage, strokeRect, type RGBA } from '../../core/image.ts'
+import { columnModes, rowsAround } from '../../core/column-modes.ts'
+import { cloneImage, createImage, strokeRect, TRANSPARENT, type RGBA } from '../../core/image.ts'
 import { evaluate } from '../../core/thresholds.ts'
 import type { AlignmentResult, Band, CompareArtifacts, CompareResult, DiffRegion, RegionKind, Warning } from '../../core/types.ts'
 import { matToImage, rowRange } from '../cv/convert.ts'
@@ -182,6 +183,24 @@ export const verdictStage: Stage<ClassifyOutput, CompareResult> = {
         artifacts.warpedCandidate = matToImage(cv, full)
         mats.release(full)
         mats.release(view)
+      }
+      if (options.artifacts.warpedCandidate) {
+        // What the viewer paints under each gap: see CompareArtifacts.gapFills.
+        const gaps = input.bands.filter((b) => b.kind !== 'matched')
+        if (gaps.length) {
+          const width = input.baseline.width
+          const strip = createImage(width, gaps.length, TRANSPARENT)
+          const cTop = W.padTop + Math.max(0, Math.ceil(W.extent.top))
+          const cBottom = W.padTop + Math.min(W.height - W.padTop, Math.floor(W.extent.bottom))
+          gaps.forEach((band, i) => {
+            const rows =
+              band.kind === 'inserted'
+                ? rowsAround(B.rgba.data, width, 0, input.baseline.height, band.baseline.start)
+                : rowsAround(W.rgba.data, width, cTop, cBottom, band.candidate.start + W.padTop)
+            if (rows.length) strip.data.set(columnModes(rows), i * width * 4)
+          })
+          artifacts.gapFills = strip
+        }
       }
       if (options.artifacts.overlay) {
         const img = cloneImage(B.original)

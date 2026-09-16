@@ -199,6 +199,14 @@ export interface CompareArtifacts {
   warpedCandidate?: RasterImage
   /** Candidate with region boxes drawn. */
   candidateOverlay?: RasterImage
+  /**
+   * One row per inserted or deleted band of the band map, in band order, at
+   * the working width: the colour each column shows most often in the rows
+   * around that gap. The viewer continues it under the gap's tint, which
+   * needs no pixel reads (a report opened from file:// cannot read its
+   * images). Produced with warpedCandidate.
+   */
+  gapFills?: RasterImage
 }
 
 export interface CompareResult {

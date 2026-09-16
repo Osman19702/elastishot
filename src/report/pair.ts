@@ -144,6 +144,7 @@ export function renderPairReport(p: PairReport, options: PairOptions = {}): stri
     p.candidate.image ? `candidate-src="${escapeHtml(p.candidate.image)}"` : '',
     p.artifacts.diff ? `diff-src="${escapeHtml(p.artifacts.diff)}"` : '',
     p.artifacts.warped ? `warped-src="${escapeHtml(p.artifacts.warped)}"` : '',
+    p.artifacts.gaps ? `gaps-src="${escapeHtml(p.artifacts.gaps)}"` : '',
     'mode="slider"',
     'show-regions',
     // The page draws the mode buttons itself, so the element's own row stays hidden.

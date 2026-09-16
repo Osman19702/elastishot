@@ -3,6 +3,7 @@ import { before, test } from 'node:test'
 
 import { isElastishotError } from '../../src/core/errors.ts'
 import { iou } from '../../src/core/geometry.ts'
+import { columnModes, rowsAround } from '../../src/core/column-modes.ts'
 import { cloneImage, createImage, fillRect } from '../../src/core/image.ts'
 import type { Box, CompareResult, DiffRegion, RasterImage, RegionKind } from '../../src/core/types.ts'
 import { addNoise, collapseRows, createPage, insertBlankRows, insertRows, moveBlock, padTo, recolor, scaleImage, shiftImage, strokeChange, glyphSpot } from '../fixtures/synth.ts'
@@ -166,6 +167,35 @@ test('alignMode none compares pixel for pixel', async () => {
   const r = await engine.compare(base, recolor(base, title, [255, 200, 0, 255]), { alignMode: 'none', structural: { enabled: false } })
   assert.equal(r.summary.alignMethod, 'identity')
   assert.equal(ofKind(r, 'changed').length, 1, describe(r))
+})
+
+test('the gaps image has one row per gap with the colours around it', async () => {
+  // 40 white rows inserted in the gap between two sections: one inserted band
+  const s0 = page.manifest.sections[0]!
+  const at = s0.box.y + s0.box.h + 12
+  const candidate = insertBlankRows(base, at, 40)
+  const r = await engine.compare(base, candidate, { artifacts: { warpedCandidate: true } })
+  const gaps = r.alignment.bandMap.filter((b) => b.kind !== 'matched')
+  assert.ok(gaps.length >= 1, JSON.stringify(r.alignment.bandMap))
+  const strip = r.artifacts.gapFills!
+  assert.ok(strip, 'gapFills')
+  assert.equal(strip.height, gaps.length)
+  assert.equal(strip.width, Math.round(base.width * r.summary.workingScale.baseline))
+  const row = strip.data.subarray(0, strip.width * 4)
+  // the page margins are white on every row, so they are white in the fill; the
+  // columns through the sections take the card colour, never a line of text
+  const px = (x: number) => Array.from(row.subarray(x * 4, x * 4 + 4))
+  assert.deepEqual(px(2), [255, 255, 255, 255])
+  assert.deepEqual(px(base.width - 3), [255, 255, 255, 255])
+  const card = px(s0.box.x + 8)
+  assert.ok(card[0]! > 200 && card[3] === 255, JSON.stringify(card))
+  const title = px(s0.title.x + 4)
+  assert.ok(title.every((v, i) => Math.abs(v - card[i]!) <= 3), JSON.stringify({ title, card }))
+  // it is the most common colour of the rows around the gap in the baseline
+  assert.deepEqual(row, columnModes(rowsAround(base.data, base.width, 0, base.height, gaps[0]!.baseline.start)))
+  // without the warped candidate there is no gaps image
+  const plain = await engine.compare(base, candidate)
+  assert.equal(plain.artifacts.gapFills, undefined)
 })
 
 test('artifacts can be requested', async () => {
