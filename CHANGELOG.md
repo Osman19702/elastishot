@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-16
+
 ### Added
 
 - Lane alignment: when side-by-side columns move independently (a card
@@ -126,7 +128,8 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/Osman19702/elastishot/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/Osman19702/elastishot/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Osman19702/elastishot/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Osman19702/elastishot/compare/v0.1.1...v0.1.2
