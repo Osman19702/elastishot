@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-16
+
 ### Changed
 
 - Same-scale captures are aligned row by row: every row is hashed and the two
@@ -101,7 +103,8 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/Osman19702/elastishot/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Osman19702/elastishot/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Osman19702/elastishot/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Osman19702/elastishot/compare/v0.1.0...v0.1.1
