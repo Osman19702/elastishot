@@ -91,11 +91,22 @@ candidate (png | url) ┘                                 │           ├─ p
 
 1. **Preprocess.** Both images are brought to the same working width (never upscaled) and converted to grey.
 2. **Global align.** ORB keypoints are matched with a ratio test, RANSAC estimates an affine transform, and it is snapped to a similarity (scale + translation) when the fit is uniform. Flat pages fall back to edge-profile correlation, then to a plain resize. The candidate is warped onto a canvas in baseline space, padded so nothing is lost.
-3. **Structural align.** Both images are cut into 8 px strips with small signatures; a Needleman-Wunsch alignment with affine gap costs maps baseline rows to candidate rows. Deleted runs become `removed` regions, inserted runs `added` regions, matched runs go to the differ with their offset refined to the pixel.
+3. **Structural align.** When both captures are the same size and the global transform is a whole-pixel shift, every row is hashed and the two sequences are aligned like lines of text: unique rows anchor the alignment, common prefix and suffix are trimmed, and rows nothing distinguishes are substitutions for the differ. Otherwise, and whenever it explains more pixels, both images are cut into 8 px strips with small signatures and a Needleman-Wunsch alignment with affine gap costs maps baseline rows to candidate rows. Deleted runs become `removed` regions, inserted runs `added` regions, matched runs go to the differ with their offset refined to the pixel.
 4. **Diff.** Matched rows are compared with pixelmatch's YIQ colour distance, tolerant to one-pixel shifts and resampling blends. Specks are removed, connected components are merged into regions and scored.
 5. **Classify.** A removed region whose pixels reappear elsewhere, or a changed region whose baseline content is found at another position, becomes one `moved` region.
 6. **Verdict.** A similarity of 0..1 (a low-confidence alignment can never reach 1), counts per kind, warnings, and pass/fail against the threshold and `failOn`.
 7. **Locators.** Each region is attributed to the smallest element covering it on each side; elements present in only one map are added with map evidence.
+
+## Measured
+
+The UI lab in `examples/ui-lab` renders one page in seven builds and records what each build changes (35 elements: added, changed, moved, expanded, re-drawn). Every run is scored against that ground truth. On the current engine:
+
+| Measure | Result |
+|---|---|
+| planted changes found, named by locator or covered by a region | 35 of 35 |
+| regions on elements nobody changed, score 0.2 or higher | 1 |
+
+The one remaining region is a stat card whose sparkline was redrawn at a new width after the cards spread out: a real difference, on an element the build did not list. Reproduce it with `node examples/ui-lab/run-lab.mjs --no-video`; the report in `examples/ui-lab/report/index.html` lists every planted change with its verdict and every noise region with its box.
 
 ## Tracking a URL across deployments
 
@@ -177,7 +188,7 @@ Images are written as files next to the pages, thumbnails are inlined so `index.
 - **Too many small regions**: raise `diff.threshold` (default 0.1) in the config `compare` section, or lower `diff.maxRegions`. `diff.antialiasTolerance` defaults to `auto`: 1 px when the candidate had to be resampled (zoom, rotation, fallback alignment) and 0 on same-scale pages, so a changed digit in small text is reported. Set it to a number to force one behaviour.
 - **A captured page was an error page**: the pair carries a `CAPTURE_ERROR_PAGE` warning when the response status was 4xx/5xx, the title looks like an error or redirect notice, or fewer than five elements were found. Check the URL, the wait settings and authentication before trusting the score.
 - **Everything below a change is reported**: the structural alignment could not find the shift. Check the `STRUCT_WEAK_MATCH` and `ALIGN_*` warnings in the pair page; long identical lists and pages without texture are the usual causes.
-- **Memory**: opencv.js keeps a few copies of the working images. Full-page captures at device pixel ratio 2 are large; `workingWidth` (default 1280, so a 1280 px viewport is compared pixel for pixel) bounds the analysis size; below it whole-pixel shifts become fractional and the antialiasing tolerance switches on, and `--max-old-space-size` helps Node with the decoded PNGs.
+- **Memory**: opencv.js keeps a few copies of the working images. Full-page captures at device pixel ratio 2 are large. Two captures of the same width are compared at their own size up to 1920 px, so their rows stay exact; wider or unequal pairs are brought to `workingWidth` (default 1280), below which whole-pixel shifts become fractional and the antialiasing tolerance switches on. `--max-old-space-size` helps Node with the decoded PNGs.
 - **TypeScript without Playwright installed**: the `elastishot/capture` and `elastishot/node` type declarations reference Playwright's types. Install `playwright` (it is the optional peer dependency anyway) or set `skipLibCheck` in your tsconfig.
 - **Windows**: paths in reports always use forward slashes; `.elastishot/runs/latest` is a text file, not a symlink.
 

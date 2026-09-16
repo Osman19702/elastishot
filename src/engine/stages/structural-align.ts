@@ -13,6 +13,7 @@ import type { Band, Box } from '../../core/types.ts'
 import type { Mat } from '../cv/cv-types.ts'
 import { colEnergy, edgeMagnitude, rowEnergy } from '../cv/ops.ts'
 import type { GlobalAlignOutput, StructuralAlignOutput, Warped, WorkingRegion } from '../model.ts'
+import { alignRows, hashRow, NO_ROW } from '../pure/row-align.ts'
 import { gapScore } from '../pure/scoring.ts'
 import { alignSequences, MAX_CELLS, opsToRuns, repairSubstitutions, type Run } from '../pure/sequence-align.ts'
 import type { Stage, StageContext } from '../stage.ts'
@@ -124,6 +125,113 @@ function exactContentCells(bands: Band[], grayB: Uint8Array, grayW: Uint8Array, 
     }
   }
   return cells
+}
+
+/**
+ * Unchanged rows are the same bytes on both sides only when nothing was
+ * resampled: both sides analysed at their own size, and a global transform
+ * that is a whole-pixel shift. Then every row can be hashed and aligned
+ * exactly, see pure/row-align.ts.
+ */
+function exactCapable(input: GlobalAlignOutput): boolean {
+  return (
+    Math.abs(input.baseline.scale - 1) < 1e-9 &&
+    Math.abs(input.candidate.scale - 1) < 1e-9 &&
+    (input.method.startsWith('features') || input.method === 'identity') &&
+    Math.abs(input.scale - 1) < 1e-6 &&
+    Math.abs(input.rotationDeg) < 1e-6 &&
+    Number.isInteger(input.translation.x) &&
+    Number.isInteger(input.translation.y)
+  )
+}
+
+/** 1 when the grey levels of the row segment spread less than CONTENT_SPREAD: a flat row. */
+function flatRow(gray: Uint8Array, start: number, end: number): number {
+  let lo = 255
+  let hi = 0
+  for (let i = start; i < end; i++) {
+    const v = gray[i]!
+    if (v < lo) lo = v
+    if (v > hi) hi = v
+    if (hi - lo >= CONTENT_SPREAD) return 0
+  }
+  return 1
+}
+
+/**
+ * Bands from the exact row alignment: every baseline row and every covered
+ * canvas row is hashed over the columns the candidate covers, and the two
+ * hash sequences are aligned like lines of text. Null when the candidate
+ * covers too little of the canvas to say anything.
+ */
+function exactRowBands(input: GlobalAlignOutput): Band[] | null {
+  const B = input.baseline
+  const W = input.warped
+  const pad = W.padTop
+  const width = B.width
+  const cov = W.coverage.data
+  // The candidate's rows on the canvas come from the warp's extent, not from
+  // the coverage mask: its edge rows are softened, and starting two rows in
+  // would pair every row with the wrong neighbour. Rows the mask does not
+  // fully cover are hashed as NO_ROW below and match nothing.
+  const cTop = Math.max(0, Math.min(W.height, Math.round(W.extent.top) + pad))
+  const cBottom = Math.max(cTop, Math.min(W.height, Math.round(W.extent.bottom) + pad))
+  if (cBottom - cTop < 2) return null
+  const mid = ((cTop + cBottom) >> 1) * width
+  let cx0 = 0
+  while (cx0 < width && cov[mid + cx0] !== 255) cx0++
+  let cx1 = width
+  while (cx1 > cx0 && cov[mid + cx1 - 1] !== 255) cx1--
+  if (cx1 - cx0 < MIN_COVERAGE * width) return null
+
+  const rgbaB = B.rgba.data
+  const rgbaW = W.rgba.data
+  const grayB = B.gray.data
+  const grayW = W.gray.data
+  const hashA = new Float64Array(B.height)
+  const blankA = new Uint8Array(B.height)
+  for (let y = 0; y < B.height; y++) {
+    const row = y * width
+    hashA[y] = hashRow(rgbaB, (row + cx0) * 4, (row + cx1) * 4)
+    blankA[y] = flatRow(grayB, row + cx0, row + cx1)
+  }
+  const nC = cBottom - cTop
+  const hashB = new Float64Array(nC)
+  const blankB = new Uint8Array(nC)
+  for (let k = 0; k < nC; k++) {
+    const row = (cTop + k) * width
+    let covered = true
+    for (let x = cx0; x < cx1; x++) {
+      if (cov[row + x] !== 255) {
+        covered = false
+        break
+      }
+    }
+    hashB[k] = covered ? hashRow(rgbaW, (row + cx0) * 4, (row + cx1) * 4) : NO_ROW
+    blankB[k] = flatRow(grayW, row + cx0, row + cx1)
+  }
+  const runs = alignRows({ a: hashA, b: hashB, blankA, blankB })
+  // A matched run of flat rows at either edge (padding both captures end
+  // in) is no evidence of where the content above it belongs; without it
+  // the gap next to it is an edge gap and the crop rules decide.
+  const flatRun = (r: Run) => {
+    if (r.kind !== 'matched') return false
+    for (let i = r.b0; i < r.b1; i++) if (!blankA[i]) return false
+    return true
+  }
+  while (runs.length > 1 && flatRun(runs[0]!)) runs.shift()
+  while (runs.length > 1 && flatRun(runs[runs.length - 1]!)) runs.pop()
+  return runs.map((r): Band => {
+    const baseline = { start: r.b0, end: r.b1 }
+    const candidate = { start: cTop + r.c0 - pad, end: cTop + r.c1 - pad }
+    let similarity = 0
+    if (r.kind === 'matched') {
+      let same = 0
+      for (let k = 0; k < r.b1 - r.b0; k++) if (hashA[r.b0 + k] === hashB[r.c0 + k]) same++
+      similarity = same / Math.max(1, r.b1 - r.b0)
+    }
+    return { kind: r.kind, axis: 'y', baseline, candidate, similarity, offset: candidate.start - baseline.start }
+  })
 }
 
 interface Signatures {
@@ -304,7 +412,9 @@ function singleBand(height: number): Band[] {
  * Larger edge gaps with good coverage are real removals or additions, for
  * example a banner added at the top of a page.
  */
-function dropCroppedEdges(ctx: StageContext, bands: Band[], baselineHeight: number, warped: Warped): Band[] {
+type Warn = StageContext['warn']
+
+function dropCroppedEdges(warn: Warn, bands: Band[], baselineHeight: number, warped: Warped): Band[] {
   if (bands.length < 2) return bands
   const extentRows = Math.max(1, warped.extent.bottom - warped.extent.top)
   const candidateCovered = (Math.min(warped.extent.bottom, baselineHeight) - Math.max(warped.extent.top, 0)) / extentRows
@@ -318,8 +428,9 @@ function dropCroppedEdges(ctx: StageContext, bands: Band[], baselineHeight: numb
     const partial = deleted ? warped.coverageFraction < CROP_COVERAGE_DELETED : candidateCovered < CROP_COVERAGE_INSERTED
     if (!small && !partial) return
     out.splice(index, 1)
+    if (rows < MIN_PART_ROWS) return
     const where = index === 0 ? 'top' : 'bottom'
-    ctx.warn(
+    warn(
       'PARTIAL_COVERAGE',
       deleted
         ? `${rows} baseline rows at the ${where} have no counterpart in the candidate and were not compared`
@@ -442,10 +553,12 @@ function gapRegions(input: GlobalAlignOutput, bands: Band[], edges: { baseline: 
     if (y1 <= y0) return
     const blank = blankRows(edge, gray, y0, y1, bg)
     const parts = splitByBlankRows(blank, y0, y1)
-    // A gap boundary sits on a strip edge, so it can swallow the edge rows of a
-    // neighbouring border line; drop such slivers when the band has real parts.
-    const kept = parts.length > 1 ? parts.filter((p) => p.y1 - p.y0 >= MIN_PART_ROWS) : parts
-    for (const part of kept.length ? kept : parts) {
+    // The edge energy of a border line bleeds a row or two into the padding
+    // next to it, and a gap boundary on a strip edge can swallow the edge
+    // rows of a neighbouring line: content parts that short are slivers, and
+    // a gap made only of slivers is padding.
+    const kept = parts.filter((p) => p.blank || p.y1 - p.y0 >= MIN_PART_ROWS)
+    for (const part of kept.length ? kept : [{ y0, y1, blank: true }]) {
       const cols = part.blank ? null : contentColumns(edge, gray, part.y0, part.y1, bg)
       const whitespace = cols === null
       const box: Box = whitespace
@@ -473,6 +586,68 @@ function gapRegions(input: GlobalAlignOutput, bands: Band[], edges: { baseline: 
     }
   })
   return out
+}
+
+/**
+ * Refine the offset of matched bands that follow a structural gap to the
+ * pixel: strips quantise a shift to stripPx, and a block whose rows were
+ * replaced may also have moved a little, so every offset within a strip is
+ * tried and the one with the smallest pixel difference kept. Bands that
+ * continue the previous offset are left alone: it is already accurate.
+ * Matched neighbours that end up with the same offset are merged.
+ */
+function refineOffsets(bands: Band[], B: GlobalAlignOutput['baseline'], W: Warped, stripPx: number, exactRows = false): Band[] {
+  const pad = W.padTop
+  let previousOffset = 0
+  let afterGap = false
+  for (const band of bands) {
+    if (band.kind !== 'matched') {
+      afterGap = true
+      continue
+    }
+    const shifted = afterGap || band.offset !== previousOffset
+    previousOffset = band.offset
+    afterGap = false
+    const len = Math.min(band.baseline.end - band.baseline.start, B.height - band.baseline.start)
+    // Rows that are the same bytes on both sides have nothing to refine.
+    if (!shifted || len < MIN_REFINE_ROWS || (exactRows && band.similarity >= 1)) continue
+    const c0 = band.candidate.start + pad
+    const dataB = B.grayBlur.data
+    const dataW = W.grayBlur.data
+    const at = (d: number): number => {
+      const cd = c0 + d
+      if (cd < 0 || cd + len > W.height) return Infinity
+      return bandDifference(dataB, dataW, B.width, band.baseline.start, cd, len)
+    }
+    const base = at(0)
+    if (!Number.isFinite(base)) continue
+    let bestD = 0
+    let best = base
+    for (let d = -stripPx; d <= stripPx; d++) {
+      if (d === 0) continue
+      const v = at(d)
+      if (v < best) {
+        best = v
+        bestD = d
+      }
+    }
+    if (bestD !== 0 && best < base * REFINE_GAIN) {
+      band.candidate = { start: band.candidate.start + bestD, end: band.candidate.end + bestD }
+      band.offset += bestD
+    }
+  }
+  const merged: Band[] = []
+  for (const band of bands) {
+    const last = merged[merged.length - 1]
+    if (last && last.kind === 'matched' && band.kind === 'matched' && last.offset === band.offset && last.baseline.end >= band.baseline.start) {
+      const n1 = last.baseline.end - last.baseline.start
+      const n2 = band.baseline.end - band.baseline.start
+      last.similarity = (last.similarity * n1 + band.similarity * n2) / Math.max(1, n1 + n2)
+      last.baseline = { start: last.baseline.start, end: Math.max(last.baseline.end, band.baseline.end) }
+      last.candidate = { start: last.candidate.start, end: Math.max(last.candidate.end, band.candidate.end) }
+    } else merged.push({ ...band })
+  }
+  return merged
 }
 
 export const structuralAlignStage: Stage<GlobalAlignOutput, StructuralAlignOutput> = {
@@ -569,63 +744,39 @@ export const structuralAlignStage: Stage<GlobalAlignOutput, StructuralAlignOutpu
       } else if (tail.kind === 'deleted') tail.baseline = { start: tail.baseline.start, end: B.height }
       else tail.candidate = { start: tail.candidate.start, end: W.height - pad }
     }
-    let bands = dropCroppedEdges(ctx, absorbTinyGaps(bandsRaw, TINY_GAP_STRIPS * stripPx), B.height, W)
+    // Warnings are buffered per band map: only the map that wins the
+    // arbitration below reports its cropped edges.
+    const later: Array<() => void> = []
+    const stripWarnings: Array<() => void> = []
+    const buffered = (into: Array<() => void>): Warn => (...args) => {
+      into.push(() => ctx.warn(...args))
+    }
+    let bands = refineOffsets(dropCroppedEdges(buffered(stripWarnings), absorbTinyGaps(bandsRaw, TINY_GAP_STRIPS * stripPx), B.height, W), B, W, stripPx)
+    later.push(...stripWarnings)
 
-    // Refine the offset of matched bands that follow a structural gap to the
-    // pixel: the strips quantise the shift to stripPx, so try every offset
-    // within a strip and keep the one with the smallest pixel difference.
-    // Bands that continue the global alignment are left alone: it is already
-    // sub-pixel accurate.
-    let previousOffset = 0
-    let afterGap = false
-    for (const band of bands) {
-      if (band.kind !== 'matched') {
-        afterGap = true
-        continue
-      }
-      const shifted = afterGap || band.offset !== previousOffset
-      previousOffset = band.offset
-      afterGap = false
-      const len = Math.min(band.baseline.end - band.baseline.start, B.height - band.baseline.start)
-      if (!shifted || len < MIN_REFINE_ROWS) continue
-      const c0 = band.candidate.start + pad
-      const dataB = B.grayBlur.data
-      const dataW = W.grayBlur.data
-      const at = (d: number): number => {
-        const cd = c0 + d
-        if (cd < 0 || cd + len > W.height) return Infinity
-        return bandDifference(dataB, dataW, B.width, band.baseline.start, cd, len)
-      }
-      const base = at(0)
-      if (!Number.isFinite(base)) continue
-      let bestD = 0
-      let best = base
-      for (let d = -stripPx; d <= stripPx; d++) {
-        if (d === 0) continue
-        const v = at(d)
-        if (v < best) {
-          best = v
-          bestD = d
+    // Same-scale captures: the pixels can settle the row pairing exactly,
+    // where strips (8 px) cannot once an insertion of some other height sits
+    // above a block. The exact-cell count arbitrates, so a row alignment
+    // that explains fewer pixels than the strips never replaces them.
+    if (exactCapable(input)) {
+      const rowBands = ctx.time('rowAlign', () => exactRowBands(input))
+      if (rowBands && rowBands.length) {
+        const rowWarnings: Array<() => void> = []
+        const refined = refineOffsets(dropCroppedEdges(buffered(rowWarnings), rowBands, B.height, W), B, W, stripPx, true)
+        const grayB = B.grayBlur.data
+        const grayW = W.grayBlur.data
+        const viaRows = exactContentCells(refined, grayB, grayW, B.width, B.height, W.height, pad)
+        const viaStrips = exactContentCells(bands, grayB, grayW, B.width, B.height, W.height, pad)
+        const dbg = debugSink()
+        if (dbg) dbg('rowAlign', { viaRows, viaStrips, bands: refined.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}`) })
+        if (viaRows >= viaStrips) {
+          bands = refined
+          later.length = 0
+          later.push(...rowWarnings)
         }
       }
-      if (bestD !== 0 && best < base * REFINE_GAIN) {
-        band.candidate = { start: band.candidate.start + bestD, end: band.candidate.end + bestD }
-        band.offset += bestD
-      }
     }
-    // Merge matched neighbours that ended up with the same offset.
-    const merged: Band[] = []
-    for (const band of bands) {
-      const last = merged[merged.length - 1]
-      if (last && last.kind === 'matched' && band.kind === 'matched' && last.offset === band.offset && last.baseline.end >= band.baseline.start) {
-        const n1 = last.baseline.end - last.baseline.start
-        const n2 = band.baseline.end - band.baseline.start
-        last.similarity = (last.similarity * n1 + band.similarity * n2) / Math.max(1, n1 + n2)
-        last.baseline = { start: last.baseline.start, end: Math.max(last.baseline.end, band.baseline.end) }
-        last.candidate = { start: last.candidate.start, end: Math.max(last.candidate.end, band.candidate.end) }
-      } else merged.push({ ...band })
-    }
-    bands = merged
+    for (const emit of later) emit()
 
     // The strip signatures can be fooled (a re-themed panel makes every strip
     // of a section look new, and free end gaps then let a far-fetched match

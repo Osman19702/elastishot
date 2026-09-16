@@ -45,6 +45,10 @@ publish, repository public.
 
 Make every result easier to believe and harder to misread.
 
+- **Exact row alignment** (shipped ahead of 0.2): same-scale captures are
+  aligned row by row from row hashes, so insertions of any height keep the
+  rows below them exact. The lab's noise count went from 19 regions to 1.
+
 - **Column-axis structural alignment.** Sidebars that widen and columns that
   reorder are today's biggest source of noise; the strip alignment gains a
   horizontal pass.

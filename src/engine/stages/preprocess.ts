@@ -7,13 +7,20 @@ import type { Stage, StageContext } from '../stage.ts'
 /** Below this working size feature alignment is pointless. */
 export const MIN_WORKING_SIDE = 32
 
+/** Pairs of one width up to this are compared at their own size, so unchanged rows stay the same bytes. */
+export const SAME_WIDTH_FULL = 1920
+
 /**
  * Both images are brought to the same working width: the smaller of the two
  * widths and the configured workingWidth. Nothing is ever upscaled, and equal
- * widths mean the aligner only has to recover a residual scale near 1.
+ * widths mean the aligner only has to recover a residual scale near 1. A pair
+ * of the same width, as two captures of one viewport are, is not downscaled
+ * at all up to SAME_WIDTH_FULL: resampling would turn every whole-pixel
+ * shift below an inserted block into a fraction of a pixel.
  */
 export function workingScales(baselineWidth: number, candidateWidth: number, workingWidth: number): { baseline: number; candidate: number } {
   if (workingWidth === 0) return { baseline: 1, candidate: 1 }
+  if (baselineWidth === candidateWidth && baselineWidth <= SAME_WIDTH_FULL) return { baseline: 1, candidate: 1 }
   const w = Math.min(baselineWidth, candidateWidth, workingWidth)
   return { baseline: w / baselineWidth, candidate: w / candidateWidth }
 }

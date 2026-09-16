@@ -4,7 +4,7 @@ import { before, test } from 'node:test'
 import { isElastishotError } from '../../src/core/errors.ts'
 import { iou } from '../../src/core/geometry.ts'
 import { cloneImage, createImage, fillRect } from '../../src/core/image.ts'
-import type { Box, CompareResult, DiffRegion, RegionKind } from '../../src/core/types.ts'
+import type { Box, CompareResult, DiffRegion, RasterImage, RegionKind } from '../../src/core/types.ts'
 import { addNoise, collapseRows, createPage, insertBlankRows, insertRows, moveBlock, padTo, recolor, scaleImage, shiftImage, strokeChange, glyphSpot } from '../fixtures/synth.ts'
 import { engine } from '../support/cv.ts'
 
@@ -226,4 +226,44 @@ test('a few rows of extra padding do not become an added region', async () => {
   assert.equal(ofKind(r, 'added').length, 0, describe(r))
   assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
   assert.ok(r.summary.similarity > 0.98, describe(r))
+})
+
+test('an insertion that is not a whole number of strips keeps every row below it exact', async () => {
+  // 34 rows: strips are 8 px, so below the block no candidate strip lines up
+  // with a baseline strip, and only the rows themselves can settle the pairing.
+  const block = createImage(base.width, 34, [255, 255, 255, 255])
+  fillRect(block, { x: 24, y: 6, w: base.width - 48, h: 22 }, [254, 226, 226, 255])
+  fillRect(block, { x: 40, y: 12, w: 220, h: 10 }, [153, 27, 27, 255])
+  const at = sections[1]!.box.y + sections[1]!.box.h + GAP / 2
+  const r = await engine.compare(base, insertRows(base, at, block))
+  const added = ofKind(r, 'added')
+  assert.equal(added.length, 1, describe(r))
+  // The block starts with six blank rows, interchangeable with the padding it lands in: the anchor sits where the visible rows begin.
+  assert.ok(added[0]!.anchorBaseline!.y >= at - 2 && added[0]!.anchorBaseline!.y <= at + 8, describe(r))
+  assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
+  assert.equal(ofKind(r, 'removed').length, 0, describe(r))
+  assert.equal(r.summary.structural.insertedRows, 34, describe(r))
+})
+
+test('rows appended after look-alike rows are one added region after them, not a shift of the block', async () => {
+  // A changelog: rows of one shape whose only difference is where a word sits.
+  const row = (mark: number): RasterImage => {
+    const img = createImage(base.width, 28, [255, 255, 255, 255])
+    fillRect(img, { x: 24, y: 0, w: base.width - 48, h: 27 }, [249, 250, 251, 255])
+    fillRect(img, { x: 40, y: 9, w: 60, h: 10 }, [75, 85, 99, 255])
+    fillRect(img, { x: 130 + mark * 37, y: 9, w: 80, h: 10 }, [75, 85, 99, 255])
+    return img
+  }
+  const table = (marks: number[]): RasterImage => marks.slice(1).reduce((acc, m) => insertRows(acc, acc.height, row(m)), row(marks[0]!))
+  const at = sections[2]!.box.y + sections[2]!.box.h + GAP / 2
+  const baseline = insertRows(base, at, table([0, 1, 2, 3]))
+  const candidate = insertRows(base, at, table([0, 1, 2, 3, 4, 5, 6]))
+  const r = await engine.compare(baseline, candidate)
+  const added = ofKind(r, 'added')
+  assert.equal(added.length, 1, describe(r))
+  const appendedAt = at + 4 * 28
+  assert.ok(Math.abs(added[0]!.anchorBaseline!.y - appendedAt) <= 2, describe(r))
+  assert.ok(added[0]!.boxCandidate && Math.abs(added[0]!.boxCandidate.h - 3 * 28) <= 4, describe(r))
+  assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
+  assert.equal(ofKind(r, 'removed').length, 0, describe(r))
 })

@@ -23,6 +23,12 @@ interface Component {
 
 const NOISE_FRACTION = 0.005
 const NOISE_MAX_AREA = 36
+/**
+ * Density is measured over a box at least this many pixels on each side: a
+ * border that moved by one pixel is a 1 px line of changed pixels, and
+ * without a floor it would score as a fully changed block.
+ */
+const DENSITY_MIN_SIDE = 4
 const SHIFTS: ReadonlyArray<readonly [number, number]> = [
   [1, 0],
   [-1, 0],
@@ -249,7 +255,7 @@ export const diffStage: Stage<StructuralAlignOutput, DiffOutput> = {
       const deltaSum = group.members.reduce((s, c) => s + c.deltaSum, 0)
       const boxWarped = group.members.slice(1).reduce((b, c) => union(b, c.boxWarped), group.members[0]!.boxWarped)
       const bands = new Set(group.members.map((c) => c.band))
-      const areaFraction = pixels / Math.max(1, group.box.w * group.box.h)
+      const areaFraction = pixels / Math.max(1, Math.max(group.box.w, DENSITY_MIN_SIDE) * Math.max(group.box.h, DENSITY_MIN_SIDE))
       const meanDelta = pixels ? deltaSum / pixels : 0
       return {
         kind: 'changed',

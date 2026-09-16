@@ -6,6 +6,32 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Same-scale captures are aligned row by row: every row is hashed and the two
+  sequences are aligned like lines of text (unique rows as anchors, common
+  prefix and suffix, substitutions where nothing is distinctive). An opened
+  FAQ answer is an insertion of exactly its height, the rows below it keep
+  their pixels, and a table row appended after look-alike rows is never paired
+  with the row above it. The 8 px strip alignment stays for resampled pairs
+  and for any page where it explains more pixels; the exact-cell count
+  arbitrates. On the UI lab this took the regions on elements nobody changed
+  from 19 to 1 with all 35 planted changes still found.
+- Pairs of the same width up to 1920 px are compared at their own size
+  instead of being brought to `workingWidth`, so a 1440 px capture keeps its
+  rows exact below an inserted block.
+- A region's density is measured over a box at least 4 px on each side, so a
+  border that moved by one pixel no longer scores like a solid block.
+
+### Fixed
+
+- Padding that grew or shrank next to a border line produced an "added" or
+  "removed" sliver of one or two rows; gaps made only of such slivers are
+  padding.
+- A run of flat rows at the top or bottom of both captures (page padding)
+  no longer anchors the alignment, so a capture that shows less of the page
+  than the other is treated as a crop again, not as content that moved.
+
 ## [0.1.3] - 2026-09-15
 
 ### Fixed
