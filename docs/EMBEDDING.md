@@ -61,7 +61,7 @@ const { result, locators, pass, failReasons } = await comparePair(
 
 When `warped-src` is given the candidate is shown pixel-exact in baseline space (the engine's `artifacts.warpedCandidate`). Without it the candidate image is placed with a CSS transform built from `alignment.transform`.
 
-When `alignment.bandMap` has inserted or deleted rows (a section that appeared or collapsed), both sides are redrawn band by band into one row space: an inserted block is a tinted gap on the baseline side, a deleted one a gap on the candidate side, and the rows below line up again in every mode. Added regions are drawn as full boxes over the gap. The gap colours are `--es-gap-added` and `--es-gap-removed`. Bands that carry `columns` come from a stretch of the page aligned lane by lane (side-by-side columns that moved independently); each lane is drawn in its own row space, and boxes map through the lane that holds them.
+When `alignment.bandMap` has inserted or deleted rows (a section that appeared or collapsed), both sides are redrawn band by band into one row space: an inserted block is a tinted gap on the baseline side, a deleted one a gap on the candidate side, and the rows below line up again in every mode. Under the tint a gap continues the row next to it, so a dark page does not show a bright bar. Added regions are drawn as full boxes over the gap. The gap colours are `--es-gap-added` and `--es-gap-removed`. Bands that carry `columns` come from a stretch of the page aligned lane by lane (side-by-side columns that moved independently); each lane is drawn in its own row space, and boxes map through the lane that holds them.
 
 React:
 

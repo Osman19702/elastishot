@@ -6,6 +6,22 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-16
+
+### Fixed
+
+- Text laid out at fractional positions lands a row lower here and a row
+  higher there, and the exact row alignment recorded that as one-row
+  deletes and inserts around every line: hairline gaps in the viewer and
+  clutter in the Structure list. A one-row gap between bands whose offsets
+  differ by one is folded into one band once the map has been chosen, a
+  one-row gap at the edge of a lane is taken into its lane, and such a gap
+  no longer counts towards opening a lane zone; the differ already treats a
+  one-pixel shift as no change.
+- The viewer drew inserted and removed rows as a tinted gap with nothing
+  under it, so on a dark page the page's own background showed through as a
+  bright bar. The row just outside the gap is now continued under the tint.
+
 ## [0.1.5] - 2026-09-16
 
 ### Added
@@ -128,7 +144,8 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/Osman19702/elastishot/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Osman19702/elastishot/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/Osman19702/elastishot/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Osman19702/elastishot/compare/v0.1.2...v0.1.3

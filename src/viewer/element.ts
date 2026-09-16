@@ -392,17 +392,25 @@ export class ElastishotViewer extends HTMLElement {
       for (const lane of lanes) {
         const x0 = lane.columns?.start ?? 0
         const x1 = lane.columns?.end ?? w
-        for (const s of lane.layout.segments) {
+        const segments = lane.layout.segments
+        segments.forEach((s, i) => {
           const r = s[side]
           if (r.end <= r.start) {
+            // A gap has no pixels of its own: continue the row just outside it
+            // (stretched over the gap) so a dark page stays dark under the tint,
+            // instead of the viewer's background showing through as a bar.
+            const before = segments.slice(0, i).reverse().find((o) => o[side].end > o[side].start)
+            const after = segments.slice(i + 1).find((o) => o[side].end > o[side].start)
+            const rowY = before ? Math.min(img.naturalHeight - 1, Math.max(0, before[side].end - 1)) : after ? Math.min(img.naturalHeight - 1, Math.max(0, after[side].start)) : -1
+            if (rowY >= 0) ctx.drawImage(img, x0, rowY, x1 - x0, 1, x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
             ctx.fillStyle = gap
             ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
-            continue
+            return
           }
           // A warp that cropped the candidate leaves rows outside the image; they stay blank.
           const v = visibleRows(s, side, img.naturalHeight)
           if (v) ctx.drawImage(img, x0, v.from, x1 - x0, v.count, x0, v.alignedStart, x1 - x0, v.count)
-        }
+        })
       }
     }
     draw(this.#baselineCanvas, this.#baselineImg, 'baseline', gapAdded)

@@ -13,7 +13,7 @@ import type { Band, Box } from '../../core/types.ts'
 import type { Mat } from '../cv/cv-types.ts'
 import { colEnergy, edgeMagnitude, roi, rowEnergy } from '../cv/ops.ts'
 import type { GlobalAlignOutput, StructuralAlignOutput, Warped, WorkingRegion } from '../model.ts'
-import { conflictZones, GUTTER_EDGE_SHARE, laneTiles } from '../pure/lanes.ts'
+import { conflictZones, foldWobble, GUTTER_EDGE_SHARE, laneTiles } from '../pure/lanes.ts'
 import { alignRows, hashRow, NO_ROW } from '../pure/row-align.ts'
 import { gapScore } from '../pure/scoring.ts'
 import { alignSequences, MAX_CELLS, opsToRuns, repairSubstitutions, type Run } from '../pure/sequence-align.ts'
@@ -821,14 +821,19 @@ export const structuralAlignStage: Stage<GlobalAlignOutput, StructuralAlignOutpu
     const W = input.warped
     const pad = W.padTop
     const edges = { baseline: edgeMagnitude(ctx, B.grayBlur), warped: edgeMagnitude(ctx, W.grayBlur) }
-    const finish = (bands: Band[], stripPx: number, matchedFraction: number): StructuralAlignOutput => ({
-      ...input,
-      bands,
-      stripPx,
-      matchedFraction,
-      edges,
-      gapRegions: gapRegions(ctx, input, bands, edges),
-    })
+    // The map is scored against its rivals as aligned; only the winner is
+    // folded, so a one-row wobble never costs it the vote.
+    const finish = (aligned: Band[], stripPx: number, matchedFraction: number): StructuralAlignOutput => {
+      const bands = foldWobble(aligned)
+      return {
+        ...input,
+        bands,
+        stripPx,
+        matchedFraction,
+        edges,
+        gapRegions: gapRegions(ctx, input, bands, edges),
+      }
+    }
 
     const shared = Math.min(B.height, W.height - pad)
     if (!st.enabled) return finish(singleBand(shared), st.stripPx, 1)

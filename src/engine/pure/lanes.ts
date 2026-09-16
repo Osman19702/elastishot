@@ -25,6 +25,65 @@ export const MIN_GUTTER = 12
 /** Content narrower than this between gutters belongs to its neighbour, not to a lane of its own. */
 export const MIN_LANE = 48
 
+/** A gap of this many rows between bands whose offsets differ by this much is layout wobble, not structure. */
+export const WOBBLE_ROWS = 1
+
+const sameLane = (a: Band, b: Band): boolean => (a.columns?.start ?? -1) === (b.columns?.start ?? -1) && (a.columns?.end ?? -1) === (b.columns?.end ?? -1)
+
+const gapRows = (b: Band): number => (b.kind === 'inserted' ? b.candidate.end - b.candidate.start : b.baseline.end - b.baseline.start)
+
+/**
+ * Text laid out at fractional positions lands a row lower here and a row
+ * higher there, and an exact row alignment records that faithfully: a
+ * one-row delete, a matched band, a one-row insert. Folding such a gap
+ * with its neighbours into one band at the first offset keeps the map
+ * readable; the differ already treats a one-pixel shift as no change,
+ * and one row is as far as rounding moves a line. At the edge of a lane
+ * the gap has a matched neighbour on one side only: a deleted row is then
+ * taken into that neighbour and an inserted row dropped. Bands fold only
+ * within their own lane, so a full map can be folded in one pass. The
+ * fold is a simplification of the finished map: it must not run before
+ * the map is scored against another, because the folded rows sit a row
+ * off their pixels and score as changed.
+ */
+export function foldWobble(bands: readonly Band[]): Band[] {
+  const out: Band[] = []
+  for (let i = 0; i < bands.length; i++) {
+    const b = bands[i]!
+    if (b.kind !== 'matched' && gapRows(b) <= WOBBLE_ROWS) {
+      const prev = out[out.length - 1]
+      const next = bands[i + 1]
+      const before = prev?.kind === 'matched' && sameLane(prev, b) ? prev : undefined
+      const after = next?.kind === 'matched' && sameLane(b, next) ? next : undefined
+      if (before && after) {
+        if (Math.abs(after.offset - before.offset) <= WOBBLE_ROWS) {
+          const n1 = before.baseline.end - before.baseline.start
+          const n2 = after.baseline.end - after.baseline.start
+          before.baseline = { start: before.baseline.start, end: after.baseline.end }
+          before.candidate = { start: before.candidate.start, end: after.baseline.end + before.offset }
+          before.similarity = (before.similarity * n1 + after.similarity * n2) / Math.max(1, n1 + n2)
+          i++
+          continue
+        }
+      } else if (before && !(next && sameLane(b, next))) {
+        if (b.kind === 'deleted') {
+          before.baseline = { start: before.baseline.start, end: b.baseline.end }
+          before.candidate = { start: before.candidate.start, end: b.baseline.end + before.offset }
+        }
+        continue
+      } else if (after && !(prev && sameLane(prev, b))) {
+        if (b.kind === 'deleted') {
+          out.push({ ...after, baseline: { start: b.baseline.start, end: after.baseline.end }, candidate: { start: b.baseline.start + after.offset, end: after.candidate.end } })
+          i++
+        }
+        continue
+      }
+    }
+    out.push({ ...b })
+  }
+  return out
+}
+
 export interface Zone {
   /** Band indices [from, to). */
   from: number
@@ -34,11 +93,22 @@ export interface Zone {
 // A long matched band that merged a few changed rows (a version digit) is still stable: what counts is how many rows are exact.
 const isStable = (b: Band): boolean => b.kind === 'matched' && b.similarity >= STABLE_SIMILARITY && (b.baseline.end - b.baseline.start) * b.similarity >= MIN_STABLE_ROWS
 
+/** The gap at `i` is a one-row wobble between two matched bands of one lane (see {@link foldWobble}). */
+const isWobble = (bands: readonly Band[], i: number): boolean => {
+  const b = bands[i]!
+  const prev = bands[i - 1]
+  const next = bands[i + 1]
+  if (b.kind === 'matched' || prev?.kind !== 'matched' || next?.kind !== 'matched' || !sameLane(prev, b) || !sameLane(b, next)) return false
+  const rows = b.kind === 'inserted' ? b.candidate.end - b.candidate.start : b.baseline.end - b.baseline.start
+  return rows <= WOBBLE_ROWS && Math.abs(next.offset - prev.offset) <= WOBBLE_ROWS
+}
+
 /**
  * Runs of bands between stable bands that hold a gap next to rows that did
  * not pair exactly: two gaps, or one gap and a substituted stretch. A lone
  * insertion between exact bands is a plain insertion; a substitution with no
- * gap is content that changed in place.
+ * gap is content that changed in place; a one-row wobble is no gap at all,
+ * or every paragraph of fractional line height would be cut into lanes.
  */
 export function conflictZones(bands: readonly Band[]): Zone[] {
   const zones: Zone[] = []
@@ -57,8 +127,9 @@ export function conflictZones(bands: readonly Band[]): Zone[] {
       return
     }
     if (start === -1) start = i
-    if (b.kind !== 'matched') gaps++
-    else substituted += Math.round((b.baseline.end - b.baseline.start) * (1 - b.similarity))
+    if (b.kind !== 'matched') {
+      if (!isWobble(bands, i)) gaps++
+    } else substituted += Math.round((b.baseline.end - b.baseline.start) * (1 - b.similarity))
   })
   flush(bands.length)
   return zones
