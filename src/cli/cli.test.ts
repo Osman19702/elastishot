@@ -21,6 +21,20 @@ function io(cwd = tmp): CliIo & { out: string[]; err: string[] } {
 const fixtures = path.resolve('test/fixtures/images')
 const exists = (p: string) => access(p).then(() => true, () => false)
 
+// The committed fixture PNGs are inputs to the tests below, to the engine
+// tier and to acceptance scenario A6, and `npm run fixtures` writes new ones
+// without staging them. This is the first tier CI runs, so a fixture that was
+// generated and never committed fails here, by name, instead of surfacing as
+// an unreadable file four tiers later.
+test('every fixture case in the manifest has its PNG on disk', async () => {
+  const manifest = JSON.parse(await readFile(path.join(fixtures, 'manifest.json'), 'utf8')) as { cases: Record<string, { file: string }> }
+  const cases = Object.entries(manifest.cases)
+  assert.ok(cases.length > 0, 'the fixture manifest lists no cases')
+  const missing: string[] = []
+  for (const [name, c] of cases) if (!(await exists(path.join(fixtures, c.file)))) missing.push(`${name} -> ${c.file}`)
+  assert.deepEqual(missing, [], `fixtures named in test/fixtures/images/manifest.json are not on disk: run npm run fixtures, and git add the new PNGs\n  ${missing.join('\n  ')}`)
+})
+
 test('help, version and usage errors', async () => {
   const h = io()
   assert.equal(await main(['--help'], h), 0)

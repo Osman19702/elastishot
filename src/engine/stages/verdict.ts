@@ -141,6 +141,7 @@ export const verdictStage: Stage<ClassifyOutput, CompareResult> = {
         similarity: b.similarity,
         offset: toOriginalRows(b.offset),
         ...(b.columns ? { columns: { start: toOriginalRows(b.columns.start), end: toOriginalRows(b.columns.end) } } : {}),
+        ...(b.blank ? { blank: b.blank } : {}),
       }
     })
     structural.matchedRows = toOriginalRows(structural.matchedRows)

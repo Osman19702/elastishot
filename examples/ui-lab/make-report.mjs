@@ -84,7 +84,7 @@ export function makeReport({ results, runDir, outDir, media, siteUrl }) {
   const ms = pairs.reduce((s, p) => s + (p.durationMs ?? 0), 0)
 
   const scenarioCard = (p) => `<section class="scenario" id="${esc(p.id)}">
-<header><span class="n">build ${p.build} · ${esc(p.viewport)}</span><h3>${esc(p.title)}</h3>${statusPill(p)}</header>
+<header><span class="n">build ${p.build}${p.before !== 1 ? ` against build ${p.before}` : ''} · ${esc(p.viewport)}</span><h3>${esc(p.title)}</h3>${statusPill(p)}</header>
 <p class="small">${esc(p.summary)}</p>
 <div class="facts"><span>similarity ${pct(p.similarity)}</span><span>${p.counts ? `+${p.counts.added} −${p.counts.removed} ~${p.counts.changed} ›${p.counts.moved}` : ''}</span><span>${p.regions} regions</span><span>${esc(p.alignMethod ?? '')}</span>${p.structural ? `<span>rows matched ${p.structural.matchedRows}, added ${p.structural.insertedRows}, removed ${p.structural.deletedRows}</span>` : ''}${p.durationMs ? `<span>${(p.durationMs / 1000).toFixed(1)} s</span>` : ''}</div>
 ${
@@ -111,9 +111,9 @@ ${overlays[p.id] ? `<figure><div class="thumb"><img src="${overlays[p.id]}" alt=
 <div class="wrap">
 <div class="eyebrow">Elastishot ${esc(results.elastishotVersion)} · run ${esc(results.runId)} · ${esc(new Date(results.createdAt).toISOString().slice(0, 16).replace('T', ' '))} UTC</div>
 <h1>Lumen UI Lab</h1>
-<p class="lead">A small product page served on localhost in eight builds. Build 1 is approved as the baseline; builds 2 to 8 each change the page in a known way, and Elastishot has to find every change and nothing else.</p>
+<p class="lead">A small product page served on localhost in ten builds. Build 1 is approved as the baseline; builds 2 to 9 each change the page in a known way, build 10 changes the card that build 9 added and is compared with build 9, and Elastishot has to find every change and nothing else.</p>
 <div class="meta"><span>Site: ${esc(siteUrl)}</span><span>Capture: Chromium, full page, desktop 1280×800 and mobile 390×844</span><span>Ground truth: ${expected} expected changes across ${pairs.length} pairs</span></div>
-${media?.video ? `<video controls playsinline preload="metadata" src="${media.video}"></video><p class="small">The walkthrough: the eight builds scrolling past, then the Elastishot summary and three pair reports with the viewer in slider, flip, blink, overlay and diff modes.</p>` : ''}
+${media?.video ? `<video controls playsinline preload="metadata" src="${media.video}"></video><p class="small">The walkthrough: the ten builds scrolling past, then the Elastishot summary and four pair reports with the viewer in slider, flip, blink, overlay and diff modes.</p>` : ''}
 <div class="tiles">
 <div class="tile ${missed === 0 ? 'ok' : 'bad'}"><div class="k">Expected changes found</div><div class="v">${found} / ${expected}</div><div class="s">${missed === 0 ? 'nothing missed' : `${missed} missed`}</div></div>
 <div class="tile ${noise === 0 ? 'ok' : noise <= 3 ? 'warn' : 'bad'}"><div class="k">Noise regions</div><div class="v">${noise}</div><div class="s">regions on elements nobody changed, score ≥ 0.2</div></div>
@@ -138,7 +138,7 @@ ${pairs.map(scenarioCard).join('\n')}
 
 <h2>Reproduce it</h2>
 <pre><code>npm run build
-node examples/ui-lab/run-lab.mjs          # builds the site, approves build 1, compares builds 2–8, records the video, writes this page
+node examples/ui-lab/run-lab.mjs          # builds the site, approves the baselines, compares builds 2–10, records the video, writes this page
 node examples/ui-lab/run-lab.mjs --no-video</code></pre>
 <p>The run folder holds the Elastishot reports themselves: <code>examples/ui-lab/.elastishot/runs/&lt;run&gt;/index.html</code> and one <code>report.html</code> per pair. To edit the scenarios, change <code>examples/ui-lab/site.mjs</code>: the <code>BUILDS</code> list is both the page variants and the ground truth.</p>
 </div>

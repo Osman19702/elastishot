@@ -131,6 +131,32 @@ test('the pair page embeds the viewer, region rows and changed locators', () => 
   assert.equal(data.locators.changedLocators[0].name, 'FAQ <section>')
 })
 
+test('the Structure list calls a blank band of one column levelling, not a removal', () => {
+  // the committed columns fixture: the left column gained two blocks and lost the 66 rows of
+  // padding under it, the right one gained a block and 44 rows of padding; the card grew by 66.
+  const bandMap: AlignmentResult['bandMap'] = [
+    { kind: 'matched', axis: 'y', baseline: { start: 0, end: 574 }, candidate: { start: 0, end: 574 }, similarity: 1, offset: 0 },
+    { kind: 'inserted', axis: 'y', baseline: { start: 574, end: 574 }, candidate: { start: 574, end: 662 }, similarity: 0, offset: 0, columns: { start: 0, end: 473 } },
+    { kind: 'deleted', axis: 'y', baseline: { start: 672, end: 738 }, candidate: { start: 804, end: 804 }, similarity: 0, offset: 132, columns: { start: 0, end: 473 }, blank: true },
+    { kind: 'inserted', axis: 'y', baseline: { start: 738, end: 738 }, candidate: { start: 760, end: 804 }, similarity: 0, offset: 22, columns: { start: 473, end: 1040 }, blank: true },
+    // A blank block across the whole width is a spacing change and is reported as one. The engine never
+    // marks such a band (gapRegions only marks a band that has `columns`), so this half is a guard on the
+    // rule, not a shape any pair produces: do not go looking for the pair that made it.
+    { kind: 'inserted', axis: 'y', baseline: { start: 900, end: 900 }, candidate: { start: 966, end: 1086 }, similarity: 0, offset: 66, blank: true },
+  ]
+  const gaps: PairReport = { ...failed, regions: [], locators: undefined, alignment: { ...alignment, bandMap } }
+  const html = renderPairReport(gaps, { viewerScript: '' })
+  assert.match(html, /<span class="k-added">88 rows inserted<\/span> at baseline row 574 in columns 0–473/)
+  assert.match(html, /<li class="levelled"><span class="muted">66 blank rows closed up<\/span> at baseline row 672 in columns 0–473<\/li>/)
+  assert.match(html, /<li class="levelled"><span class="muted">44 blank rows opened up<\/span> at baseline row 738 in columns 473–1040<\/li>/)
+  assert.match(html, /<span class="k-added">120 rows inserted<\/span> at baseline row 900<\/li>/)
+  assert.doesNotMatch(html, /66 rows removed|44 rows inserted/)
+  assert.match(html, /the padding that column's own growth needed/)
+  // with no blank column band the note stays away
+  const plain = renderPairReport({ ...gaps, alignment: { ...alignment, bandMap: bandMap.filter((b) => !b.blank || !b.columns) } }, { viewerScript: '' })
+  assert.doesNotMatch(plain, /the padding that column's own growth needed/)
+})
+
 test('a pair without images still renders', () => {
   const html = renderPairReport(errored)
   assert.doesNotMatch(html, /<elastishot-viewer/)

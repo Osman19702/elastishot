@@ -1,10 +1,17 @@
 /**
- * "Lumen", a small product page rendered in eight builds. Build 1 is the
+ * "Lumen", a small product page rendered in ten builds. Build 1 is the
  * approved baseline; every later build changes the page in one family of
- * ways (new elements, text, shifts, expansions, images) or mixes them like
- * a real release. `BUILDS` is the ground truth the lab checks Elastishot
- * against: every entry names the element (by data-testid) and the kind of
- * change a tester would expect to see reported.
+ * ways (new elements, text, shifts, expansions, images, columns that grow
+ * on their own) or mixes them like a real release. `BUILDS` is the ground
+ * truth the lab checks Elastishot against: every entry names the element
+ * (by data-testid) and the kind of change a tester would expect to see
+ * reported.
+ *
+ * A build is compared with build 1 unless it says `before`. Build 10 changes
+ * a card that build 9 introduced, so build 9 is what it is compared with,
+ * and builds 1 to 8 stay the pages they were: a region's score is relative
+ * to the page's area, and a taller page 1 would move every number the lab
+ * has reported so far.
  */
 
 export const BUILDS = [
@@ -94,6 +101,28 @@ export const BUILDS = [
     summary: 'The hero copy gains a sentence and wraps to one more line; the illustration beside it stays. Everything below the hero moves down, the buttons under the copy move within their column.',
     expected: [{ testid: 'hero-copy', kind: 'changed', what: 'sentence appended, one more line' }],
   },
+  {
+    n: 9,
+    name: 'card-added',
+    title: 'Build 9 — a release card',
+    summary: 'A "Latest release" section appears between the pricing and the questions: a card with a picture across it and two columns of text below the picture.',
+    expected: [{ testid: 'release', kind: 'added', what: 'release section with its card' }],
+  },
+  {
+    n: 10,
+    name: 'card-columns',
+    before: 9,
+    title: 'Build 10 — two columns under a redrawn picture',
+    summary: 'Against build 9: the picture of the release card is redrawn in place at the same size; below it the notes gain a list item and a second note, and the details gain a line while a date and a checksum are edited in place. The two columns grow by different amounts.',
+    expected: [
+      { testid: 'release-shot', kind: 'changed', what: 'picture redrawn in place, same size' },
+      { testid: 'release-item-export', kind: 'added', what: 'list item in the middle of the left column' },
+      { testid: 'release-note-lock', kind: 'added', what: 'second note at the foot of the left column' },
+      { testid: 'release-mirror', kind: 'added', what: 'new line in the right column' },
+      { testid: 'release-date', kind: 'changed', what: '2 September → 9 September, in place above the new line' },
+      { testid: 'release-hash', kind: 'changed', what: 'checksum edited in place below the new line' },
+    ],
+  },
 ]
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
@@ -119,6 +148,42 @@ function sparkSvg(variant) {
 </svg>`
 }
 
+// The release card's picture: a drawing of a Lumen board as wide as the
+// card, so it lies across the gutter of the two columns below it, and dense
+// there: the heat map has an edge every few pixels in most of its rows, the
+// way the text of a real screenshot has. A picture that is flat where the
+// gutter runs would leave the gutter blank over the whole page and hide what
+// build 10 is for. Variant b is the same board captured again: the sidebar is
+// open, another item is active, the tiles, the bars and the heat map show new
+// numbers. No row of it is left as it was.
+function boardSvg(variant) {
+  const b = variant === 'b'
+  const side = b ? 176 : 150
+  const bars = b ? [96, 150, 118, 188, 140, 204] : [120, 104, 156, 96, 172, 134]
+  const tiles = b ? [148, 96, 172] : [120, 164, 110]
+  const shades = ['#22364d', '#2b4a73', '#2f5bd8', '#5f86ee', '#9db8ff']
+  const menu = [0, 1, 2, 3, 4, 5].map((i) => `<rect x="20" y="${70 + i * 30}" width="${side - 60 - (i % 3) * 14}" height="8" rx="4" fill="${i === (b ? 3 : 1) ? '#7aa2ff' : '#3a4757'}"/>`).join('')
+  const tileRects = tiles.map((w, i) => `<rect x="${200 + i * 256}" y="64" width="240" height="72" rx="8" fill="#1a2633"/><rect x="${216 + i * 256}" y="80" width="80" height="8" rx="4" fill="#5b6675"/><rect x="${216 + i * 256}" y="102" width="${w}" height="16" rx="4" fill="#e6ecfb"/>`).join('')
+  const barRects = bars.map((h, i) => `<rect x="${216 + i * 34}" y="${388 - h}" width="22" height="${h}" rx="3" fill="${b && i === 5 ? '#f5b301' : '#2f5bd8'}"/>`).join('')
+  const cells = []
+  for (let row = 0; row < 18; row++) for (let col = 0; col < 44; col++) cells.push(`<rect x="${456 + col * 11}" y="${192 + row * 11}" width="9" height="9" fill="${shades[b ? (row * 3 + col * 4 + ((row * col) % 4) + 1) % 5 : (row * 7 + col * 3) % 5]}"/>`)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 982 420" width="982" height="420">
+<rect width="982" height="420" rx="10" fill="#111a24"/>
+<path d="M10 0H${side}V420H10A10 10 0 0 1 0 410V10A10 10 0 0 1 10 0Z" fill="#0a1017"/>
+<circle cx="30" cy="30" r="10" fill="#2f5bd8"/><circle cx="30" cy="30" r="4" fill="#fff"/>
+${menu}
+<rect x="200" y="20" width="${b ? 210 : 160}" height="12" rx="6" fill="#e6ecfb"/>
+<rect x="870" y="14" width="88" height="24" rx="6" fill="#2f5bd8"/>
+${tileRects}
+<rect x="200" y="152" width="224" height="252" rx="8" fill="#1a2633"/>
+<rect x="216" y="168" width="96" height="8" rx="4" fill="#5b6675"/>
+${barRects}
+<rect x="440" y="152" width="518" height="252" rx="8" fill="#1a2633"/>
+<rect x="456" y="168" width="${b ? 150 : 120}" height="8" rx="4" fill="#5b6675"/>
+${cells.join('')}
+</svg>`
+}
+
 const ICONS = {
   bolt: '<path d="M13 2 4 14h6l-1 8 9-12h-6z"/>',
   shield: '<path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5z"/>',
@@ -138,6 +203,8 @@ export function render(n) {
   const images = n === 6
   const release = n === 7
   const columns = n === 8
+  const hasCard = n >= 9
+  const card = n === 10
 
   const version = text ? 'v2.4.2' : release ? 'v2.5.0' : 'v2.4.1'
   const cta = text ? 'Start free trial' : release ? 'Get started' : 'Start free'
@@ -220,6 +287,44 @@ ${rows.map((r, i) => `<tr data-testid="changelog-row-${i + 1}"><td>${r[0]}</td><
 </tbody></table>
 </section>`
 
+  // A card with a picture across it and two columns below, the columns
+  // level at the top and free at the bottom. The heading between the
+  // picture and the columns is the same in every build: it is the run of
+  // unchanged rows that lets the columns' stretch end below the picture.
+  const meta = [
+    ['Version', '2.4.1'],
+    ['Released', `<span data-testid="release-date">${card ? '9' : '2'} September 2026</span>`],
+    ...(card ? [['Mirror', 'eu-west-1 and us-east-2', 'release-mirror']] : []),
+    ['Size', '4.2 MB'],
+    ['Checksum', `<code data-testid="release-hash">sha256 ${card ? 'c41d07e2b95a' : '8f3a90b16c7e'}</code>`],
+    ['Requires', 'Agent 1.9 or newer'],
+    ['Supported until', 'September 2027'],
+  ]
+  const releaseCard = `<section class="section" id="release" data-testid="release">
+<h2>Latest release</h2>
+<article class="card release-card">
+<img class="release-shot" data-testid="release-shot" src="img/board.svg" width="982" height="420" alt="A Lumen board with three tiles, a bar chart and a heat map">
+<h3>Lumen 2.4: saved views</h3>
+<p class="release-sub">A board's filters, grouping and time range, kept under one name.</p>
+<div class="release-cols">
+<div class="release-notes" data-testid="release-notes">
+<p>Open a board, set it up the way you read it and save it as a view. The next person starts where you stopped.</p>
+<ul>
+<li data-testid="release-item-share">Share a view by link; the link respects project roles.</li>
+<li data-testid="release-item-pin">Pin up to five views to the project sidebar.</li>
+${card ? '<li data-testid="release-item-export">Export the rows of a view as CSV or Parquet.</li>' : ''}
+<li data-testid="release-item-default">Set a default view for each board.</li>
+</ul>
+<p class="note" data-testid="release-note">Views are stored with the project and count against no quota.</p>
+${card ? '<p class="note" data-testid="release-note-lock">An admin can lock a view so that only admins change it.</p>' : ''}
+</div>
+<dl class="release-meta" data-testid="release-meta">
+${meta.map(([k, v, testid]) => `<div${testid ? ` data-testid="${testid}"` : ''}><dt>${k}</dt><dd>${v}</dd></div>`).join('\n')}
+</dl>
+</div>
+</article>
+</section>`
+
   const hero = `<section class="hero${shifts ? ' hero-flip' : ''}${expand ? ' hero-tall' : ''}">
 <div class="hero-text">
 <span class="badge" data-testid="version">${version}</span>
@@ -256,7 +361,8 @@ ${promo ? '<div class="promo" data-testid="promo"><strong>Lumen Conf, 14 October
 ${hero}
 ${stats}
 ${shifts ? pricing + '\n' + featuresSection : featuresSection + '\n' + pricing}
-${faq}
+${hasCard ? `${releaseCard}
+` : ''}${faq}
 ${changelog}
 </main>
 <footer class="footer"><span>© 2026 Lumen, a fictional product for this lab</span><nav aria-label="Footer"><a href="#">Privacy</a><a href="#">Terms</a><a href="#">Status</a></nav></footer>
@@ -268,6 +374,7 @@ ${changelog}
 export const assets = (n) => ({
   'img/hero.svg': heroSvg(n === 6 ? 'b' : 'a'),
   'img/spark.svg': sparkSvg(n === 6 || n === 7 ? 'b' : 'a'),
+  ...(n >= 9 ? { 'img/board.svg': boardSvg(n === 10 ? 'b' : 'a') } : {}),
 })
 
 export const STYLES = `
@@ -312,6 +419,18 @@ main { max-width: 1120px; margin: 0 auto; padding: 0 48px 64px; }
 .price { font-size: 32px; font-weight: 700; margin: 0 0 12px; }
 .price small { font-size: 13px; font-weight: 400; color: var(--muted); }
 .plan ul { margin: 0 0 16px; padding-left: 18px; color: var(--muted); }
+.release-shot { display: block; width: 100%; height: auto; }
+.release-card h3 { margin: 20px 0 4px; font-size: 20px; }
+.release-sub { margin: 0 0 20px; color: var(--muted); }
+.release-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: start; }
+.release-notes p { margin: 0 0 12px; }
+.release-notes ul { margin: 0 0 12px; padding-left: 18px; color: var(--muted); }
+.release-notes .note { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+.release-meta { margin: 0; }
+.release-meta div { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.release-meta dt { color: var(--muted); }
+.release-meta dd { margin: 0; }
+.release-meta code { font: 14px/24px Consolas, "Courier New", monospace; }
 details { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; }
 summary { font-weight: 600; cursor: pointer; }
 details p { margin: 10px 0 0; color: var(--muted); }
@@ -321,5 +440,5 @@ th { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: 
 tr:last-child td { border-bottom: 0; }
 .footer { display: flex; justify-content: space-between; padding: 24px 48px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
 .footer nav { display: flex; gap: 16px; }
-@media (max-width: 700px) { .nav { padding: 12px 16px; gap: 16px; } .nav nav { display: none; } main { padding: 0 16px 48px; } .hero { grid-template-columns: 1fr; padding: 24px 0; } .hero h1 { font-size: 32px; } .hero-img { width: 100%; height: auto; } .stats { grid-template-columns: 1fr 1fr; } .grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .nav { padding: 12px 16px; gap: 16px; } .nav nav { display: none; } main { padding: 0 16px 48px; } .hero { grid-template-columns: 1fr; padding: 24px 0; } .hero h1 { font-size: 32px; } .hero-img { width: 100%; height: auto; } .stats { grid-template-columns: 1fr 1fr; } .grid { grid-template-columns: 1fr; } .release-cols { grid-template-columns: 1fr; gap: 16px; } }
 `

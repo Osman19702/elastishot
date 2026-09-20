@@ -34,7 +34,7 @@ The first release candidate exists and is field-tested.
   flip, blink, overlay, diff), JSON, JUnit XML.
 - CLI: `compare`, `snapshot`, `run`, `approve`, `report`; config file with
   targets × viewports; exit codes for CI.
-- Four test tiers: 90 unit, 26 engine, 16 browser, 28 Gherkin acceptance
+- Four test tiers: 147 unit, 44 engine, 30 browser, 30 Gherkin acceptance
   scenarios; a field test on 13 real public pages; the Lumen UI lab
   (`examples/ui-lab`) with ground truth that scores every run.
 

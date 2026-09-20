@@ -1,6 +1,6 @@
 /**
- * Record the walkthrough: the eight builds scrolling past, then the
- * Elastishot summary and three pair reports with the viewer in every mode.
+ * Record the walkthrough: the ten builds scrolling past, then the
+ * Elastishot summary and four pair reports with the viewer in every mode.
  * Playwright writes a WebM; screenshots of each build and of the summary
  * page are taken on the way. Returns the file names relative to `outDir`.
  */
@@ -108,7 +108,7 @@ export async function record({ siteUrl, runDir, outDir }) {
   await page.waitForTimeout(2500)
   await scrollThrough(page, { step: 240, pause: 120, settle: 600 })
 
-  // 3. three pair reports
+  // 3. four pair reports
   await showReport(page, runDir, 'release--desktop', 'release (desktop)', [['slider', 0], ['flip', 1600], ['blink', 2600], ['overlay', 1600], ['diff', 1800]])
   await page.evaluate(() => document.querySelector('h2')?.nextElementSibling?.scrollIntoView({ block: 'start' }))
   await caption(page, 'Changed elements', 'the table names every element behind a change; a row jumps to its region')

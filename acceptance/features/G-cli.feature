@@ -24,6 +24,7 @@ Feature: G — Behaving well in a pipeline
   Scenario: G5 — --help and --version exit 0
     When I run --help and --version
     Then both exit with 0
+    And the version printed is the version of the checkout under test
 
   Scenario: G6 — run honours --threshold and --fail-on
     Given a target whose baseline is version 1 of a page

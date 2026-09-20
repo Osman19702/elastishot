@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * The whole lab in one go:
- *   1. build the eight Lumen pages and serve them on http://127.0.0.1:4321
- *   2. approve build 1 as the baseline of every scenario (elastishot run --update)
+ *   1. build the ten Lumen pages and serve them on http://127.0.0.1:4321
+ *   2. approve every scenario's "before" build as its baseline: build 1, or
+ *      the build the scenario names (elastishot run --update)
  *   3. run the scenarios against their "after" builds (elastishot run)
  *   4. score the run against the ground truth (verify.mjs)
  *   5. record the walkthrough video and screenshots (record.mjs)
@@ -22,6 +23,7 @@ import { startStaticServer } from '../../test/support/static-server.js'
 import { buildSite, DIST } from './build.mjs'
 import { makeReport } from './make-report.mjs'
 import { record } from './record.mjs'
+import { BUILDS } from './site.mjs'
 import { verifyRun } from './verify.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -48,7 +50,10 @@ const server = await startStaticServer(DIST, { port: PORT })
 console.log(`serving ${server.url}`)
 try {
   fs.rmSync(path.join(here, '.elastishot'), { recursive: true, force: true })
-  console.log('\n== approving build 1 as the baseline')
+  // Named from BUILDS, like the config and the ground truth, so the line
+  // cannot say one thing while another build is captured.
+  const named = BUILDS.filter((b) => b.before).map((b) => `build ${b.before} for build ${b.n}`)
+  console.log(`\n== approving the baselines (build 1${named.length ? `, and ${named.join(', ')}` : ''})`)
   const approved = await elastishot(['run', '--config', config, '--update'], { LAB_BASELINE: '1' })
   if (approved !== 0) throw new Error(`baseline run exited with ${approved}`)
 

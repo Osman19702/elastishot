@@ -5,16 +5,19 @@
  * by a line and its right column does not, no row below the growth matches
  * exactly, and the row alignment falls back to a run of short bands, inserts
  * and deletes that make unchanged text look changed. Such a stretch shows up
- * as a conflict zone: consecutive bands with more than one gap and no exact
- * matched band with enough exact rows between them. Inside a zone the page is cut at
- * its gutters (columns blank on both sides for every row of the zone) into
- * lanes, and each lane is aligned on its own.
+ * as a conflict zone: consecutive bands with more than one gap and no long
+ * run of exact rows between them. Such a run ends a zone wherever it sits,
+ * also inside a band whose other rows changed in place: a zone has to be as
+ * short as the conflict, because inside a zone the page is cut at its gutters
+ * (columns blank on both sides for every row of the zone) into lanes, and
+ * each lane is aligned on its own. A zone that climbs past the card to the
+ * heading and the image above it finds no gutter between the card's columns.
  */
 import type { Band, Range } from '../../core/types.ts'
 
 /** A matched band with at least this many exact rows separates conflict zones... */
 export const MIN_STABLE_ROWS = 48
-/** ...as long as nearly all of its rows are exact: half-equal rows are what a lane conflict looks like. */
+/** ...as long as nearly all of its rows are exact: half-equal rows are what a lane conflict looks like. A band below this still separates zones at each run of MIN_STABLE_ROWS exact rows in a row, see {@link splitSubstitutedEdges}. */
 export const STABLE_SIMILARITY = 0.9
 /** A zone with a single gap still counts when this many of its matched rows are not exact. */
 export const MIN_CONFLICT_ROWS = 16
@@ -22,8 +25,10 @@ export const MIN_CONFLICT_ROWS = 16
 export const GUTTER_EDGE_SHARE = 0.05
 /** A gutter must be at least this wide (working pixels) to split lanes. */
 export const MIN_GUTTER = 12
-/** Content narrower than this between gutters belongs to its neighbour, not to a lane of its own. */
+/** Content narrower than this between gutters belongs to a neighbour, not to a lane of its own. */
 export const MIN_LANE = 48
+/** ...to the previous neighbour only when that gutter is this many times the narrower one: which side such a span hangs from is clear at a margin and guesswork below it, see {@link laneTiles}. */
+export const NEARER_RATIO = 3
 
 /** A gap of this many rows between bands whose offsets differ by this much is layout wobble, not structure. */
 export const WOBBLE_ROWS = 1
@@ -31,6 +36,9 @@ export const WOBBLE_ROWS = 1
 const sameLane = (a: Band, b: Band): boolean => (a.columns?.start ?? -1) === (b.columns?.start ?? -1) && (a.columns?.end ?? -1) === (b.columns?.end ?? -1)
 
 const gapRows = (b: Band): number => (b.kind === 'inserted' ? b.candidate.end - b.candidate.start : b.baseline.end - b.baseline.start)
+
+// A long matched band that merged a few changed rows (a version digit) is still stable: what counts is how many rows are exact.
+const isStable = (b: Band): boolean => b.kind === 'matched' && b.similarity >= STABLE_SIMILARITY && (b.baseline.end - b.baseline.start) * b.similarity >= MIN_STABLE_ROWS
 
 /**
  * Text laid out at fractional positions lands a row lower here and a row
@@ -94,10 +102,34 @@ export const SETTLED_ROWS = 24
  * unchanged rows, so no row hashes equal. Such a stretch at the edge of a
  * band beside a gap is split off (as a band of its own, with its exact
  * share as similarity) so that the zone can take it; `exact(row, offset)`
- * says whether a baseline row pairs exactly at an offset. Lane bands and
- * bands not beside a gap are left alone.
+ * says whether a baseline row pairs exactly at an offset.
+ *
+ * What is left of the band can still hold rows that changed in place far
+ * from the gap: the image on top of a card, re-rendered at the same size,
+ * above two columns that grew. Its exact share then says nothing about the
+ * rows next to the conflict. Judged as one band it is not stable, and the
+ * zone would climb through it to the top of the page, across the heading
+ * and the image that cross the card's gutter, where only a gutter of the
+ * whole page is blank (the one before a fixed nav rail) and the lane left
+ * of it repeats the tangle. So a remainder that is not stable as a whole is
+ * cut at its runs of MIN_STABLE_ROWS exact rows, each a band of similarity
+ * 1, and the zone ends at the nearest of them. At every such run, not only
+ * the nearest: a band between two conflicts has one on either side, and
+ * the pieces in between hold no gap, so no zone takes them.
+ *
+ * A stable remainder is never cut and no zone reaches further than it would
+ * have without the cut, but "shorter" is not the whole story: each part of a
+ * conflict the cut divides has to qualify on its own (see
+ * {@link conflictZones}). Parts left with one gap and fewer than
+ * MIN_CONFLICT_ROWS substituted rows each get no zone at all, and a part
+ * that does qualify can be too short to hold the rows its lanes have to
+ * explain. The runs the cut made are therefore collected in `cutRuns`, so
+ * that {@link widenedZones} can offer the whole conflict back to the lane
+ * alignment, which keeps it when its lanes pair more pixels than the parts
+ * do. {@link mergeContiguous} joins the pieces no zone used. Lane bands and
+ * exact bands are left alone.
  */
-export function splitSubstitutedEdges(bands: readonly Band[], exact: (baselineRow: number, offset: number) => boolean): Band[] {
+export function splitSubstitutedEdges(bands: readonly Band[], exact: (baselineRow: number, offset: number) => boolean, cutRuns?: Set<Band>): Band[] {
   const out: Band[] = []
   bands.forEach((b, i) => {
     if (b.kind !== 'matched' || b.columns || b.similarity >= 1) {
@@ -142,7 +174,26 @@ export function splitSubstitutedEdges(bands: readonly Band[], exact: (baselineRo
       return
     }
     if (head > b.baseline.start) out.push(piece(b.baseline.start, head))
-    out.push(piece(head, tail))
+    const settled = piece(head, tail)
+    let from = head
+    if (!isStable(settled)) {
+      let y = head
+      while (y < tail) {
+        let end = y
+        while (end < tail && exact(end, b.offset)) end++
+        if (end - y >= MIN_STABLE_ROWS) {
+          if (y > from) out.push(piece(from, y))
+          const run = piece(y, end)
+          out.push(run)
+          cutRuns?.add(run)
+          from = end
+        }
+        // row `end` did not pair exactly (a row with no candidate pixels behind it never does), or the remainder is over
+        y = end + 1
+      }
+    }
+    if (from === head) out.push(settled)
+    else if (from < tail) out.push(piece(from, tail))
     if (tail < b.baseline.end) out.push(piece(tail, b.baseline.end))
   })
   return out
@@ -171,9 +222,6 @@ export interface Zone {
   from: number
   to: number
 }
-
-// A long matched band that merged a few changed rows (a version digit) is still stable: what counts is how many rows are exact.
-const isStable = (b: Band): boolean => b.kind === 'matched' && b.similarity >= STABLE_SIMILARITY && (b.baseline.end - b.baseline.start) * b.similarity >= MIN_STABLE_ROWS
 
 /** The gap at `i` is a one-row wobble between two matched bands of one lane (see {@link foldWobble}). */
 const isWobble = (bands: readonly Band[], i: number): boolean => {
@@ -217,6 +265,58 @@ export function conflictZones(bands: readonly Band[]): Zone[] {
   return zones
 }
 
+/** A band that ends a conflict zone: a lane band, or a band stable enough to stand between two conflicts. */
+const endsZone = (b: Band): boolean => !!b.columns || isStable(b)
+
+export interface WideZone extends Zone {
+  /** A gap in this range ended in no zone at all: the parts leave a whole gap unexplained, whatever their lanes do. */
+  orphan: boolean
+}
+
+/**
+ * The conflicts {@link splitSubstitutedEdges} divided, each grown back to the
+ * zone it would have been without the cut: from the last band that ends a
+ * zone and is not itself a run the cut made, to the next one.
+ *
+ * A run of exact rows is only evidence that the rows it covers pair; it is no
+ * evidence about the columns beside them. It can fall between a card's two
+ * gaps (one column is blank there while the other still moves), and then the
+ * parts it leaves are not the conflict: one part keeps a gap and too few
+ * substituted rows to be a zone at all, or it qualifies but its lanes have to
+ * explain rows whose insertion point lies in the other part. Both failures
+ * are offered back here as the single zone they came from - the second from
+ * its zone, the first from its orphaned gap - for the caller to keep only
+ * when the wider answer pairs more pixels. Ranges that cross no cut run are
+ * left out: there is nothing there to widen.
+ */
+export function widenedZones(bands: readonly Band[], zones: readonly Zone[], cutRuns: ReadonlySet<Band>): WideZone[] {
+  if (!cutRuns.size) return []
+  const taken = new Uint8Array(bands.length)
+  for (const z of zones) for (let i = z.from; i < z.to; i++) taken[i] = 1
+  const orphans = new Set<number>()
+  bands.forEach((b, i) => {
+    if (!taken[i] && b.kind !== 'matched' && !isWobble(bands, i)) orphans.add(i)
+  })
+  const out: WideZone[] = []
+  const seen = new Set<number>()
+  for (const seed of [...zones.map((z) => z.from), ...orphans].sort((a, b) => a - b)) {
+    let from = seed
+    while (from > 0 && !(endsZone(bands[from - 1]!) && !cutRuns.has(bands[from - 1]!))) from--
+    let to = seed + 1
+    while (to < bands.length && !(endsZone(bands[to]!) && !cutRuns.has(bands[to]!))) to++
+    if (seen.has(from)) continue
+    seen.add(from)
+    let crosses = false
+    let orphan = false
+    for (let i = from; i < to; i++) {
+      if (cutRuns.has(bands[i]!)) crosses = true
+      if (orphans.has(i)) orphan = true
+    }
+    if (crosses) out.push({ from, to, orphan })
+  }
+  return out
+}
+
 /**
  * Cut the width into lanes at the gutters of a zone. `blank[x]` is 1 when
  * column x is blank on both sides for every row of the zone. Lanes tile the
@@ -238,19 +338,30 @@ export function laneTiles(blank: Uint8Array, width: number): Range[] {
     x = end
   }
   if (spans.length < 2) return []
-  // spans separated by a gutter narrower than MIN_GUTTER are one span; so
-  // are spans too narrow to be a lane (a bullet column, a border line)
-  const merged: Range[] = [spans[0]!]
+  // spans separated by a gutter narrower than MIN_GUTTER are one span
+  const merged: Range[] = [{ ...spans[0]! }]
   for (let i = 1; i < spans.length; i++) {
     const prev = merged[merged.length - 1]!
     const s = spans[i]!
-    if (s.start - prev.end < MIN_GUTTER || prev.end - prev.start < MIN_LANE) prev.end = s.end
+    if (s.start - prev.end < MIN_GUTTER) prev.end = s.end
     else merged.push({ ...s })
   }
-  const last = merged[merged.length - 1]!
-  if (merged.length >= 2 && last.end - last.start < MIN_LANE) {
-    merged[merged.length - 2]!.end = last.end
-    merged.pop()
+  // A span too narrow to be a lane (a bullet column, a border line) joins the
+  // next span, as a marker precedes the text it belongs to and may stand
+  // further from it than a gutter is wide. It joins the previous one instead
+  // when the gutter behind it is clearly the narrower of the two: in a short
+  // zone the end of a paragraph's one long line is such a span, and joined to
+  // the card's border far to its right the two pass for a lane that cuts the
+  // paragraph in two. Clearly, not merely: a marker column half again nearer
+  // the left column's text than its own still belongs to its own.
+  const narrow = (s: Range): boolean => s.end - s.start < MIN_LANE
+  for (let i = merged.findIndex(narrow); i !== -1 && merged.length > 1; i = merged.findIndex(narrow)) {
+    const s = merged[i]!
+    const before = merged[i - 1]
+    const after = merged[i + 1]
+    if (before && (!after || after.start - s.end >= NEARER_RATIO * (s.start - before.end))) before.end = s.end
+    else after!.start = s.start
+    merged.splice(i, 1)
   }
   if (merged.length < 2) return []
   const tiles: Range[] = []

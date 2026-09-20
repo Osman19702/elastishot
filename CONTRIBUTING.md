@@ -51,4 +51,7 @@ of Node built-ins; `npm run check:layering` enforces it.
 
 - One change per pull request, with a test where the change is testable.
 - Update `CHANGELOG.md` under "Unreleased".
+- `npm run fixtures` writes new PNGs under `test/fixtures/images`: stage them
+  by name, because `git commit -a` does not pick up files git has never seen
+  and CI reads them.
 - Do not bump the version; releases are cut by the maintainer.

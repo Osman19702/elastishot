@@ -1,21 +1,21 @@
-// Elastishot config for the UI lab. Every target is one deployment scenario.
-// With LAB_BASELINE=1 every target points at build 1, which is how the
-// baselines are approved; without it each target points at the build that
-// plays the "after" deployment for that scenario.
+// Elastishot config for the UI lab. Every target is one deployment scenario:
+// a name, the build that plays the "after" deployment and, when it is not
+// build 1, the build it is compared with. With LAB_BASELINE=1 every target
+// points at its "before" build, which is how the baselines are approved.
+//
+// The list comes from site.mjs, which is the ground truth the run is scored
+// against: a build number written here and not there would compare one pair
+// and label another. Build 1 keeps the target name `no-change` (site.mjs
+// calls the build itself `baseline`), so its pair id and baseline folder stay
+// what they have always been and verify.mjs goes on leaving it unscored: it
+// plants no change, so there is nothing to find.
+import { BUILDS } from './site.mjs'
+
 const PORT = process.env.LAB_PORT ?? '4321'
 const build = (n) => `http://127.0.0.1:${PORT}/build-${n}/`
 const baseline = process.env.LAB_BASELINE === '1'
 
-const scenarios = [
-  ['no-change', 1],
-  ['new-elements', 2],
-  ['text-changes', 3],
-  ['shifts', 4],
-  ['expansions', 5],
-  ['images', 6],
-  ['release', 7],
-  ['columns', 8],
-]
+const scenarios = BUILDS.map((b) => [b.n === 1 ? 'no-change' : b.name, b.n, b.before ?? 1])
 
 export default {
   baselineDir: '.elastishot/baselines',
@@ -27,9 +27,9 @@ export default {
   ],
   capture: { fullPage: true, waitUntil: 'load', freezeAnimations: true },
   report: { title: 'Lumen UI lab' },
-  targets: scenarios.map(([name, n]) => ({
+  targets: scenarios.map(([name, after, before = 1]) => ({
     name,
-    url: build(baseline ? 1 : n),
+    url: build(baseline ? before : after),
     // The mixed release is also checked on a phone; the single-family
     // scenarios stay on the desktop viewport.
     viewports: name === 'release' ? ['desktop', 'mobile'] : ['desktop'],

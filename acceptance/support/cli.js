@@ -9,7 +9,15 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-export const BIN = path.join(root, 'bin', 'elastishot.js')
+// ELASTISHOT_BIN points the tier at another build's bin/elastishot.js, an
+// installed release for one: a new scenario is shown to fail there before
+// its fix is trusted here. It redirects every scenario of every group, so a
+// variable left behind in a shell would quietly certify another build: the
+// redirect announces itself on stderr once per test file, and
+// `npm run test:trace` (the last step of test:all) refuses to run with it
+// set.
+export const BIN = process.env.ELASTISHOT_BIN ? path.resolve(process.env.ELASTISHOT_BIN) : path.join(root, 'bin', 'elastishot.js')
+if (process.env.ELASTISHOT_BIN) console.error(`acceptance: ELASTISHOT_BIN is set, driving ${BIN} instead of this tree's bin/elastishot.js`)
 export const FIXTURE_IMAGES = path.join(root, 'test', 'fixtures', 'images')
 export const FIXTURE_SITE = path.join(root, 'test', 'fixtures', 'site')
 

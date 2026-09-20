@@ -34,6 +34,15 @@ export function verifyRun(runDir, changesPath) {
   for (const pair of report.pairs) {
     const scenario = byName.get(pair.target ?? pair.name)
     if (!scenario) continue
+    // The build that was captured has to be the build the ground truth
+    // describes. Without this the label, the expected changes and the pair
+    // could drift apart and the report would still read "found 6/6".
+    const wantBase = `/build-${scenario.before ?? 1}/`
+    const wantCand = `/build-${scenario.n}/`
+    const baseUrl = pair.baseline?.meta?.url
+    const candUrl = pair.candidate?.meta?.url
+    if (baseUrl && !baseUrl.endsWith(wantBase)) throw new Error(`${pair.id}: the baseline captured ${baseUrl}, but the ground truth says build ${scenario.before ?? 1} — elastishot.config.js and site.mjs disagree`)
+    if (candUrl && !candUrl.endsWith(wantCand)) throw new Error(`${pair.id}: the candidate captured ${candUrl}, but the ground truth says build ${scenario.n} — elastishot.config.js and site.mjs disagree`)
     const dir = path.join(runDir, 'pairs', pair.id)
     const baselineMap = fs.existsSync(path.join(dir, 'baseline.map.json')) ? readJson(path.join(dir, 'baseline.map.json')) : null
     const candidateMap = fs.existsSync(path.join(dir, 'candidate.map.json')) ? readJson(path.join(dir, 'candidate.map.json')) : null
@@ -84,6 +93,7 @@ export function verifyRun(runDir, changesPath) {
       target: pair.target ?? pair.name,
       viewport: pair.viewport?.name ?? 'desktop',
       build: scenario.n,
+      before: scenario.before ?? 1,
       title: scenario.title,
       summary: scenario.summary,
       status: pair.status,

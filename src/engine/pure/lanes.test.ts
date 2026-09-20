@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import type { Band, Range } from '../../core/types.ts'
-import { conflictZones, foldWobble, laneTiles, mergeContiguous, splitSubstitutedEdges } from './lanes.ts'
+import { conflictZones, foldWobble, laneTiles, mergeContiguous, splitSubstitutedEdges, widenedZones } from './lanes.ts'
 
 const band = (kind: Band['kind'], b0: number, b1: number, offset = 0, similarity = kind === 'matched' ? 1 : 0): Band => ({
   kind,
@@ -76,6 +76,152 @@ test('the inexact rows beside a gap are split off so the zone can take them', ()
   assert.deepEqual(splitSubstitutedEdges(alone, () => false).map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}`), ['m0-100', 'm100-200', 'i200-200', 'm200-300'])
 })
 
+const ranges = (bands: readonly Band[]): string[] => bands.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}`)
+/** An oracle for one offset: every row pairs exactly except those in the given [start, end) ranges. */
+const exactExcept = (offset: number, ...bad: Array<[number, number]>) => (y: number, o: number): boolean => o !== offset || !bad.some(([s, e]) => y >= s && y < e)
+
+test('a zone ends at the nearest long run of exact rows, however much changed in place above it', () => {
+  // the portfolio card: the screenshot on top of the card was re-rendered at the same size
+  // (rows 273-300, 484-608, 730-758), the version under it changed (894-903) and so did a
+  // date next to the columns (1150-1160); from 1201 the left column grew by 78 rows. Of the
+  // rows above the columns 84% are exact, so as one band they are not stable.
+  const bands = [band('matched', 0, 1414, -78, 0.71), { ...band('inserted', 1414, 1414, -78), candidate: { start: 1336, end: 1414 } }, band('matched', 1414, 2132)]
+  const exact = exactExcept(-78, [273, 300], [484, 608], [730, 758], [894, 903], [1150, 1160], [1201, 1414])
+  const cuts = new Set<Band>()
+  const split = splitSubstitutedEdges(bands, exact, cuts)
+  assert.deepEqual(ranges(split), ['m0-273@-78', 'm273-300@-78', 'm300-484@-78', 'm484-608@-78', 'm608-730@-78', 'm730-758@-78', 'm758-894@-78', 'm894-903@-78', 'm903-1150@-78', 'm1150-1201@-78', 'm1201-1414@-78', 'i1414-1414@-78', 'm1414-2132@0'])
+  // every long run is a band of similarity 1, what lies between them keeps its exact share
+  assert.deepEqual(split.slice(0, 11).map((b) => Number(b.similarity.toFixed(2))), [1, 0, 1, 0, 1, 0, 1, 0, 1, 0.8, 0])
+  // the 41 exact rows above the columns settle where the substituted stretch ends but are too
+  // few to end a zone: it climbs to the 247 exact rows above the date, and no further. The
+  // heading and the image, which cross the card's gutter, stay outside.
+  assert.deepEqual(conflictZones(split), [{ from: 9, to: 12 }])
+  assert.equal(split[9]!.baseline.start, 1150)
+  // the runs are the cut's own work, so the whole conflict is offered back as
+  // well: rows 0-1414, which is the zone 0.1.7 made of it. It stops at the band
+  // below, which was stable before the cut. laneAlign keeps the short zone
+  // unless the wider one pairs more pixels and cuts at the same gutters, and
+  // here it neither does (the lanes of the wider zone miss the card's gutter).
+  assert.deepEqual(widenedZones(split, conflictZones(split), cuts), [{ from: 0, to: 12, orphan: false }])
+})
+
+test('a run of 47 exact rows does not end a zone, a run of 48 does', () => {
+  const bands = [band('matched', 0, 400, 0, 0.6), band('inserted', 400, 400), band('matched', 400, 900, 22)]
+  const short = splitSubstitutedEdges(bands, exactExcept(0, [100, 160], [207, 215], [262, 270], [300, 400]))
+  // runs of 47, 47 and 30 rows: the zone climbs through all of them to the first 100 rows
+  assert.deepEqual(ranges(short), ['m0-100@0', 'm100-300@0', 'm300-400@0', 'i400-400@0', 'm400-900@22'])
+  assert.deepEqual(conflictZones(short), [{ from: 1, to: 4 }])
+  const long = splitSubstitutedEdges(bands, exactExcept(0, [100, 160], [208, 215], [262, 270], [300, 400]))
+  assert.deepEqual(ranges(long), ['m0-100@0', 'm100-160@0', 'm160-208@0', 'm208-300@0', 'm300-400@0', 'i400-400@0', 'm400-900@22'])
+  assert.deepEqual(conflictZones(long), [{ from: 3, to: 6 }])
+})
+
+test('a band that is stable as a whole is not cut', () => {
+  // a version digit changed 500 rows above the gap: 940 of the 960 settled rows are exact
+  const bands = [band('matched', 0, 1000, 0, 0.94), band('inserted', 1000, 1000), band('matched', 1000, 1500, 22)]
+  const cuts = new Set<Band>()
+  const split = splitSubstitutedEdges(bands, exactExcept(0, [500, 520], [960, 1000]), cuts)
+  assert.deepEqual(ranges(split), ['m0-960@0', 'm960-1000@0', 'i1000-1000@0', 'm1000-1500@22'])
+  assert.ok(Math.abs(split[0]!.similarity - 940 / 960) < 1e-9)
+  assert.deepEqual(conflictZones(split), [{ from: 1, to: 3 }])
+  // nothing was cut, so there is nothing to widen and laneAlign does its one pass
+  assert.equal(cuts.size, 0)
+  assert.deepEqual(widenedZones(split, conflictZones(split), cuts), [])
+})
+
+test('an in-place change above a plain insertion is no zone, and the cuts merge back into the bands that came in', () => {
+  // an image changed in place (rows 200-500) and a section was inserted 500 rows below it
+  const bands = [band('matched', 0, 1000, 0, 0.7), band('inserted', 1000, 1000), band('matched', 1000, 1500, 22)]
+  const cuts = new Set<Band>()
+  const split = splitSubstitutedEdges(bands, exactExcept(0, [200, 500]), cuts)
+  assert.deepEqual(ranges(split), ['m0-200@0', 'm200-500@0', 'm500-1000@0', 'i1000-1000@0', 'm1000-1500@22'])
+  // the changed rows hold no gap and the gap has exact rows on both sides
+  assert.deepEqual(conflictZones(split), [])
+  assert.deepEqual(mergeContiguous(split), bands)
+  // Both runs are the cut's own work, so the gap they orphaned is offered back as
+  // the conflict rows 0-1000 were before the cut. The rows cannot say whether this
+  // is an image redrawn above a plain insertion (no lanes: the test below) or a
+  // card whose short column ended (lanes, see the test after it) - they are the
+  // same shape. Only the pixels decide, in laneAlign's vote.
+  assert.deepEqual([...cuts].map((b) => `${b.baseline.start}-${b.baseline.end}`), ['0-200', '500-1000'])
+  assert.deepEqual(widenedZones(split, [], cuts), [{ from: 0, to: 4, orphan: true }])
+})
+
+test('a card whose short column ended has the same shape: one gap orphaned between two runs of the cut', () => {
+  // a card of plain text, no screenshot: the left column of 8 lines gains one at row
+  // 142, the right column of 16 gains one at row 416. Between the two changes every
+  // row pairs exactly at the old offset, because the left column is over - so the cut
+  // makes that run a stable band, and the gap of the conflict lands in a flush with no
+  // substituted rows while its substituted rows land in a flush with no gap.
+  const bands = [band('matched', 0, 416, 0, 0.61), band('inserted', 416, 416), band('matched', 416, 728, 22)]
+  const cuts = new Set<Band>()
+  const split = splitSubstitutedEdges(bands, exactExcept(0, [142, 306]), cuts)
+  assert.deepEqual(ranges(split), ['m0-142@0', 'm142-306@0', 'm306-416@0', 'i416-416@0', 'm416-728@22'])
+  assert.deepEqual(conflictZones(split), [])
+  assert.deepEqual(widenedZones(split, [], cuts), [{ from: 0, to: 4, orphan: true }])
+})
+
+test('a conflict the cut divides can lose its zone altogether, and comes back as the one zone it was', () => {
+  // 0.1.7 made rows [100,600) one zone: an insertion, 15 rows that did not pair, 200
+  // rows redrawn in place far from either gap, 15 more rows and a second insertion.
+  // The cut turns the two long exact runs into stable bands, and each part is left
+  // with one gap and 15 substituted rows, one short of MIN_CONFLICT_ROWS.
+  const bands = [band('matched', 0, 100), band('inserted', 100, 100), band('matched', 100, 600, -20, 0.54), band('inserted', 600, 600, -20), band('matched', 600, 1200, -40)]
+  const cuts = new Set<Band>()
+  const split = splitSubstitutedEdges(bands, exactExcept(-20, [100, 115], [200, 400], [585, 600]), cuts)
+  assert.deepEqual(ranges(split), ['m0-100@0', 'i100-100@0', 'm100-115@-20', 'm115-200@-20', 'm200-400@-20', 'm400-585@-20', 'm585-600@-20', 'i600-600@-20', 'm600-1200@-40'])
+  assert.deepEqual(conflictZones(split), [])
+  // neither gap touches a run of the cut, but both lie in the stretch the runs
+  // divide, and that stretch is the zone 0.1.7 made of them
+  assert.deepEqual(widenedZones(split, [], cuts), [{ from: 1, to: 8, orphan: true }])
+})
+
+test('a cut can leave one part a zone and the other part an orphaned gap, inside one widened stretch', () => {
+  // Two panes, the left one empty but for a block of text low down
+  // (COLUMNS_PAIRS.emptyPane): the right pane gains a row at 164 and gives one
+  // back at 438, so the page keeps its height. Between the two the left pane's
+  // block, which never moved, does not pair at the shifted offset; above it 110
+  // rows do, because the left pane is blank there and the right pane only moved.
+  // The cut makes a stable band of those 110 rows, and what it leaves is neither
+  // of the two shapes above: the lower part keeps a gap AND its substituted
+  // rows, so it is still a zone and finds the panes' gutter on its own, while
+  // the insertion above the run is left in a flush with no substituted rows and
+  // gets no zone at all. That mixture is what laneAlign has to arbitrate here -
+  // `inner` is not empty and `orphan` is set, so the parts have not explained
+  // the stretch however well their one zone did, and the gutter guard `keeps`
+  // cannot speak. Only the orphaned gap, which no lane covers and which
+  // therefore lies across the empty pane, separates the two answers.
+  const bands = [band('matched', 0, 164), band('inserted', 164, 164), band('matched', 164, 438, 22, 0.78), band('deleted', 438, 460, 22), band('matched', 460, 728)]
+  const cuts = new Set<Band>()
+  const split = splitSubstitutedEdges(bands, exactExcept(22, [274, 284], [296, 306], [318, 328], [340, 350], [362, 372], [384, 394]), cuts)
+  assert.deepEqual(ranges(split), ['m0-164@0', 'i164-164@0', 'm164-274@22', 'm274-438@22', 'd438-460@22', 'm460-728@0'])
+  assert.deepEqual([...cuts].map((b) => `${b.baseline.start}-${b.baseline.end}`), ['164-274'])
+  assert.deepEqual(conflictZones(split), [{ from: 3, to: 5 }])
+  assert.deepEqual(widenedZones(split, conflictZones(split), cuts), [{ from: 1, to: 5, orphan: true }])
+})
+
+test('two conflicts with a long exact run between them are two zones', () => {
+  // a card grew at row 300 and another shrank at row 1000; between them an image changed in place (480-600)
+  const bands = [band('matched', 0, 300), band('inserted', 300, 300), band('matched', 300, 1000, 22, 0.69), band('deleted', 1000, 1010, 22), band('matched', 1010, 1400, 12)]
+  const split = splitSubstitutedEdges(bands, exactExcept(22, [300, 340], [480, 600], [940, 1000]))
+  // the runs start at the settled head and end at the settled tail: no empty piece on either side
+  assert.deepEqual(ranges(split), ['m0-300@0', 'i300-300@0', 'm300-340@22', 'm340-480@22', 'm480-600@22', 'm600-940@22', 'm940-1000@22', 'd1000-1010@22', 'm1010-1400@12'])
+  // each conflict keeps its own rows; the image between them changed in place and is no zone
+  assert.deepEqual(conflictZones(split), [
+    { from: 1, to: 3 },
+    { from: 6, to: 8 },
+  ])
+})
+
+test('the band below a conflict is cut the same way', () => {
+  // the columns end at row 530; an image far below changed in place (700-1200), and the
+  // candidate has no pixels behind the last ten rows, so those never pair exactly either
+  const bands = [band('matched', 0, 500), band('inserted', 500, 500), band('matched', 500, 2000, 22, 0.64)]
+  const split = splitSubstitutedEdges(bands, exactExcept(22, [500, 530], [700, 1200], [1990, 2000]))
+  assert.deepEqual(ranges(split), ['m0-500@0', 'i500-500@0', 'm500-530@22', 'm530-700@22', 'm700-1200@22', 'm1200-1990@22', 'm1990-2000@22'])
+  assert.deepEqual(conflictZones(split), [{ from: 1, to: 3 }])
+})
+
 test('a split no zone used is merged back into one band', () => {
   const pieces = [band('matched', 0, 2455, 0, 1), band('matched', 2455, 2543, 0, 0.1), band('inserted', 2543, 2543), band('matched', 2543, 2913, 43)]
   const merged = mergeContiguous(pieces)
@@ -109,6 +255,49 @@ test('a bullet column or a border line is not a lane, and a word gap is not a gu
   assert.deepEqual(laneTiles(blank, width), [
     { start: 0, end: 275 },
     { start: 275, end: 600 },
+  ])
+})
+
+test('a span too narrow to be a lane joins the next one, and goes back only when its gap behind is clearly the smaller', () => {
+  const tiles = (width: number, ...content: Array<[number, number]>): Range[] => {
+    const blank = new Uint8Array(width).fill(1)
+    for (const [start, end] of content) blank.fill(0, start, end)
+    return laneTiles(blank, width)
+  }
+  // a collapsed FAQ in a bordered card: its one long line ends 24 px beyond the others, and
+  // in a zone as short as the FAQ those rows are too many for a gutter to allow for. Joined
+  // to the card's right border 700 px away it would be a lane, and cut the paragraph at 485.
+  // 12 px behind it against 702 ahead: the gap behind is clearly the smaller one.
+  assert.deepEqual(tiles(1280, [58, 60], [61, 63], [83, 479], [491, 498], [503, 515], [1217, 1219], [1220, 1222]), [])
+  // an icon after the left column's text stays with the left column: 20 px against 160
+  assert.deepEqual(tiles(1000, [100, 400], [420, 440], [600, 900]), [
+    { start: 0, end: 520 },
+    { start: 520, end: 1000 },
+  ])
+  // and one before the right column's text with the right column
+  assert.deepEqual(tiles(1000, [100, 400], [560, 580], [600, 900]), [
+    { start: 0, end: 480 },
+    { start: 480, end: 1000 },
+  ])
+  // a marker column of a list, 18 px from the left column's text and 33 px from its own:
+  // nearer the left column, but not clearly, so it stays with the lines it marks and the
+  // cut falls in the gutter. Joined to the left lane it would cut marker from line, and
+  // report the unchanged markers as removed when the right column grows.
+  assert.deepEqual(tiles(1040, [74, 455], [473, 485], [518, 886]), [
+    { start: 0, end: 464 },
+    { start: 464, end: 1040 },
+  ])
+  // the same at 22 px against 30
+  assert.deepEqual(tiles(1040, [104, 440], [462, 470], [502, 880]), [
+    { start: 0, end: 451 },
+    { start: 451, end: 1040 },
+  ])
+  // as far from one neighbour as from the other, 70 px each way: the next one takes it, as
+  // the rule reads. Joined backwards instead, the cut would fall at 525 and take 90 px of
+  // the right lane with it.
+  assert.deepEqual(tiles(1000, [100, 400], [470, 490], [560, 860]), [
+    { start: 0, end: 435 },
+    { start: 435, end: 1000 },
   ])
 })
 

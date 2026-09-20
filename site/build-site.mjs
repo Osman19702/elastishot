@@ -81,7 +81,7 @@ const fill = {
   LAB_PAIRS: String(results.pairs.length),
   LAB_SECONDS: String(runSeconds),
   VIDEO_BLOCK: hasVideo
-    ? `<video controls playsinline preload="metadata" src="video/lab-walkthrough.webm"></video><p class="cap">Sixty-five seconds: the seven builds of the lab, the summary page, then three pair reports with every viewer mode.</p>`
+    ? `<video controls playsinline preload="metadata" src="video/lab-walkthrough.webm"></video><p class="cap">The walkthrough: the ten builds of the lab, the summary page, then four pair reports with every viewer mode.</p>`
     : '',
 }
 html = html.replace(/\{\{([A-Z_]+)\}\}/g, (m, k) => (k in fill ? fill[k] : m))

@@ -7,6 +7,11 @@
  * point is that no scenario can be silently forgotten).
  *
  * Run: npm run test:trace
+ *
+ * It also refuses to run with ELASTISHOT_BIN set. That variable redirects the
+ * whole acceptance tier at another build (docs/ATDD.md explains why), and
+ * test:trace is the last step of test:all, so a variable left behind in a
+ * shell cannot end in a green test:all that never ran this tree's CLI.
  */
 
 import fs from 'node:fs'
@@ -33,6 +38,12 @@ export function readTests() {
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
 if (isMain) {
+  if (process.env.ELASTISHOT_BIN) {
+    console.error(`ELASTISHOT_BIN is set (${process.env.ELASTISHOT_BIN}).`)
+    console.error('It points the acceptance tier at another build, so this run would not certify this tree.')
+    console.error('Unset it and run again: PowerShell `$env:ELASTISHOT_BIN = $null`, POSIX `unset ELASTISHOT_BIN`.')
+    process.exit(1)
+  }
   const scenarios = readScenarios()
   const tests = readTests()
   const rows = scenarios.map((s) => {

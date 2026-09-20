@@ -24,11 +24,20 @@ published from a laptop.
 2. Bump `version` in `package.json` to the same number (no tag yet):
    `npm version x.y.z --no-git-tag-version`.
 3. `npm run test:all && npm run build && npm run check:package`.
-4. Commit: `git commit -s -am "release: x.y.z"` and push.
-5. Tag and push the tag: `git tag vx.y.z && git push origin vx.y.z`.
-6. Watch the Release workflow. It refuses a tag that does not match
+4. Stage everything, new files included: `git status --short` and then
+   `git add -A`. `-am` alone stages only files git already tracks, and a
+   release that adds a source file or a binary fixture (`test/fixtures/images/*.png`,
+   which scenario A6 reads) would pass every check on the laptop and go red
+   on CI, where the file does not exist. `npm test` fails with
+   "run npm run fixtures" when a fixture named in the manifest is missing,
+   but only for a file that is missing on disk, not for one that is merely
+   unstaged.
+5. Commit: `git commit -s -m "release: x.y.z"` and push. Check with
+   `git show --stat HEAD` that every file you meant to release is in it.
+6. Tag and push the tag: `git tag vx.y.z && git push origin vx.y.z`.
+7. Watch the Release workflow. It refuses a tag that does not match
    `package.json` or a version already on npm.
-7. Verify: `npm view elastishot version`, the provenance badge on the npm
+8. Verify: `npm view elastishot version`, the provenance badge on the npm
    page, and the GitHub release with the tarball and `SHA256SUMS`.
 
 ## If it fails

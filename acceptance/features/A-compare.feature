@@ -33,3 +33,12 @@ Feature: A — Comparing two images or two pages
     When I compare a page image with the same image where one glyph of one-pixel strokes changed
     Then the command exits with 1
     And exactly one changed region is reported, on the glyph
+
+  Scenario: A6 — Two columns of a card grew by different amounts under a picture that changed in place
+    When I compare a page image with a version where the card's picture was redrawn in place, its left column gained lines at two places, and its right column gained one line and had three lines edited
+    Then the command exits with 1
+    And the new lines are reported as added, each block in its own column and where it stands
+    And nothing is reported as removed or moved
+    And each edited line is reported as a change no taller than a line, and no other text of the columns is reported
+    And the picture's change is reported inside the picture only
+    And every block of rows that exists on one side only belongs to one column of the card

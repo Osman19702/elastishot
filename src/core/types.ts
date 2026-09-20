@@ -90,6 +90,16 @@ export interface Band {
    * band that spans the full width.
    */
   columns?: Range
+  /**
+   * Set on an inserted or deleted band of one lane whose rows carry nothing
+   * that could be reported: card or page background, padding, at most a
+   * sliver of the edge bleed of the line beside it. It is the padding that
+   * lane's own growth opened or closed so the lanes end level again, and it
+   * gets no region (see gapRegions). Never set on a band that spans the full
+   * width: there nothing else can have moved those rows, so they are a
+   * spacing change and keep their whitespace-only region.
+   */
+  blank?: true
 }
 
 export interface AlignmentResult {

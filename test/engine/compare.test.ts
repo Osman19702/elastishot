@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
 import { before, test } from 'node:test'
 
 import { isElastishotError } from '../../src/core/errors.ts'
 import { iou } from '../../src/core/geometry.ts'
 import { columnModes, rowsAround } from '../../src/core/column-modes.ts'
-import { cloneImage, createImage, fillRect } from '../../src/core/image.ts'
+import { cloneImage, createImage, cropImage, fillRect, imagesEqual } from '../../src/core/image.ts'
+import { readImageFile } from '../../src/node/io.ts'
 import type { Box, CompareResult, DiffRegion, RasterImage, RegionKind } from '../../src/core/types.ts'
-import { addNoise, collapseRows, createPage, insertBlankRows, insertRows, moveBlock, padTo, recolor, scaleImage, shiftImage, strokeChange, glyphSpot } from '../fixtures/synth.ts'
+import { COLUMNS_LINE, COLUMNS_PAIRS, addNoise, collapseRows, columnChanges, createColumnsPage, createPage, insertBlankRows, insertRows, moveBlock, padTo, recolor, scaleImage, shiftImage, strokeChange, glyphSpot, type ColumnsPair } from '../fixtures/synth.ts'
 import { engine } from '../support/cv.ts'
 
 before(() => engine.warmup())
@@ -121,6 +124,29 @@ test('moved block: reported once as moved', async () => {
   const moved = ofKind(r, 'moved', 0)
   assert.ok(moved.length >= 1, describe(r))
   assert.ok(moved.some((x) => covers(x.boxBaseline, from, 0.5) && x.confidence >= 0.9), describe(r))
+})
+
+test('a block that slid up while the page kept its height: it is not compared in place', async () => {
+  // The blank gap above section 2 loses 40 rows and the gap below it gains
+  // them back, so only that section moved and the page is exactly as tall as
+  // before. The strips describe that as a deletion, a matched band at another
+  // offset and an insertion: a detour, and here a true one, because the rows
+  // pair exactly where it says and nowhere else. A map that folded every such
+  // detour to keep its two neighbours in one band would compare the section
+  // against the rows it no longer occupies and report it changed in place.
+  const s = sections[2]!
+  const slide = 40
+  const above = s.box.y - GAP / 2
+  const below = s.box.y + s.box.h + GAP / 2
+  const candidate = insertBlankRows(collapseRows(base, above, above + slide), below - slide, slide)
+  assert.equal(candidate.height, base.height)
+  const r = await engine.compare(base, candidate)
+  assert.ok(
+    r.alignment.bandMap.some((b) => b.kind === 'matched' && b.offset === -slide),
+    describe(r),
+  )
+  assert.ok(!ofKind(r, 'changed').some((x) => covers(x.boxBaseline, s.box, 0.3)), describe(r))
+  assert.ok(r.summary.similarity > 0.95, describe(r))
 })
 
 test('flat images fall back without throwing', async () => {
@@ -327,4 +353,211 @@ test('two side-by-side columns: the left one gains a line, the right one is comp
   assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
   assert.equal(ofKind(r, 'removed').length, 0, describe(r))
   assert.ok(r.alignment.bandMap.some((b) => b.columns), describe(r))
+})
+
+// The portfolio's project card: a screenshot across the card, two text columns
+// below it, a nav rail beside it (see COLUMNS_PAIRS). The columns grow by
+// different amounts, so they need a lane each; the screenshot changes in place,
+// which once made the rows above the columns unstable as a band, let the
+// conflict zone climb over the screenshot to the top of the page, where only
+// the gutter before the rail is blank, and left both columns in one lane.
+// Every pair is held against the same ground truth, read off the line seeds.
+async function compareColumns(which: ColumnsPair): Promise<void> {
+  const [a, b] = COLUMNS_PAIRS[which]
+  const baseline = createColumnsPage(a)
+  const candidate = createColumnsPage(b)
+  const m = baseline.manifest
+  const left = columnChanges(m.left, candidate.manifest.left, m.pitchLeft)
+  const right = columnChanges(m.right, candidate.manifest.right, m.pitchRight)
+  const r = await engine.compare(baseline.image, candidate.image)
+
+  const inGutter = (x: number): boolean => x >= m.gutter.start && x <= m.gutter.end
+  assert.ok(r.alignment.bandMap.some((band) => band.columns && (inGutter(band.columns.start) || inGutter(band.columns.end))), `no lane boundary in the card's gutter: ${describe(r)}`)
+  // A column that grows more than its card leaves fewer rows of padding under it, and the column
+  // beside it more: that band holds no content, produces no region and is marked blank, so the
+  // viewer can leave it untinted and the report call it levelling instead of a block that went away.
+  // Marked exactly when no region cites it, and only ever within a lane.
+  r.alignment.bandMap.forEach((band, i) => {
+    if (band.kind === 'matched') return
+    const reported = r.regions.some((x) => x.band === i)
+    assert.equal(band.blank ?? false, band.columns ? !reported : false, `band ${i} ${band.kind} ${JSON.stringify(band.columns)}: ${describe(r)}`)
+  })
+  // a column that grew lost nothing: a removed region is the row alignment's tangle, not the page
+  assert.equal(ofKind(r, 'moved').length, 0, describe(r))
+  // and nothing was deleted across the gutter either. Where the paragraphs of the two columns break on
+  // different rows, a comparison that keeps them in one lane pairs one stretch at the left column's
+  // offset and the next at the right column's, and the rows in between come out as a block deleted from
+  // the whole card between two blocks added to it. Deleting rows of one column is legitimate (the
+  // control's left column ends higher than it did); deleting rows of both at once is that tangle.
+  assert.ok(
+    !r.alignment.bandMap.some((band) => band.kind === 'deleted' && (!band.columns || (band.columns.start < m.gutter.start && band.columns.end > m.gutter.end))),
+    describe(r),
+  )
+
+  const isLeft = (box: Box): boolean => box.x + box.w / 2 < (m.gutter.start + m.gutter.end) / 2
+  const sameRows = (box: Box, target: Box): boolean => {
+    const shared = Math.min(box.y + box.h, target.y + target.h) - Math.max(box.y, target.y)
+    return shared / (box.h + target.h - shared) >= 0.8
+  }
+  // the new lines are added regions of their own column, where they stand in the candidate
+  const added = ofKind(r, 'added').map((x) => x.boxCandidate!)
+  // and of one column only: a stripe across the card is the row alignment giving up
+  assert.ok(added.every((box) => box.w < m.card.w), describe(r))
+  for (const [side, truth] of [[added.filter(isLeft), left], [added.filter((box) => !isLeft(box)), right]] as const) {
+    assert.equal(side.length, truth.added.length, describe(r))
+    for (const block of truth.added) assert.ok(side.some((box) => sameRows(box, block)), `${JSON.stringify(block)}: ${describe(r)}`)
+  }
+
+  // below the screenshot nothing changed but the lines edited in place: one small region
+  // each, and none in the left column, whose rows all moved
+  const changed = ofKind(r, 'changed').map((x) => x.boxBaseline!)
+  const inColumns = changed.filter((box) => box.y >= m.gridY - 4 && box.y < m.card.y + m.card.h)
+  assert.equal(inColumns.filter(isLeft).length, left.edited.length, describe(r))
+  assert.equal(inColumns.length, left.edited.length + right.edited.length, describe(r))
+  for (const line of right.edited) assert.ok(inColumns.some((box) => !isLeft(box) && box.h <= COLUMNS_LINE && sameRows(box, line)), `${JSON.stringify(line)}: ${describe(r)}`)
+  // above them the screenshot's own change is reported in place, and only there
+  const above = changed.filter((box) => box.y < m.gridY - 4)
+  assert.equal(above.length > 0, b.shot === 'b', describe(r))
+  assert.ok(above.every((box) => box.y >= m.shot.y && box.y + box.h <= m.shot.y + m.shot.h), describe(r))
+  // and below the card only what the candidate redrew there: the second picture, inside its own box
+  const under = changed.filter((box) => box.y >= m.card.y + m.card.h)
+  assert.equal(under.length > 0, b.belowShot === 'b' || b.belowText === 'b', describe(r))
+  if (b.belowShot === 'b') assert.ok(under.every((box) => box.y >= m.belowShot!.y && box.y + box.h <= m.belowShot!.y + m.belowShot!.h), describe(r))
+  // the markers of a list move with the lines they mark: none of them is reported,
+  // and the added lines of their column reach back over them
+  const hits = (box: Box, target: Box): boolean => box.x < target.x + target.w && box.x + box.w > target.x && box.y < target.y + target.h && box.y + box.h > target.y
+  for (const marker of m.markers) assert.ok(!changed.some((box) => hits(box, marker)), `${JSON.stringify(marker)} reported as changed: ${describe(r)}`)
+  if (m.markers.length) for (const box of added.filter((x) => !isLeft(x))) assert.ok(box.x <= m.markers[0]!.x, describe(r))
+}
+
+test('a two-column card under a screenshot that changed in place: each column is compared on its own rows', () => compareColumns('grown'))
+
+test('the same card under an unchanged screenshot, which never failed: the control', () => compareColumns('control'))
+
+test('only the left column grows under the changed screenshot: its lines are added where they stand, not at the bottom of the card', () => compareColumns('leftOnly'))
+
+test('paragraphs that break on different rows in the two columns: no full-width stripes of added and removed rows', () => compareColumns('stripes'))
+
+test('columns of different line pitch under the changed screenshot: a line of one column shares its rows with two of the other', () => compareColumns('pitches'))
+
+test('the same card with no nav rail beside it: the lanes are the columns of the card', () => compareColumns('noRail'))
+
+test('a second picture under the card changed in place as well: the zone ends above it, not at the page foot', () => compareColumns('belowShot'))
+
+// A limitation of the same family as the defect above, reachable and untested until now. The zone still
+// reaches down to its gap: with the first line under the card redrawn in place and only blank rows between
+// it and the card's foot, the insertion floats past that line, the line falls inside the zone, its rows
+// cross the gutter, no tiles form and the columns stay in one lane. The released 0.1.7 reports the same
+// thing, so this is not a regression; it is what the fix does not reach. A failing todo is reported as
+// todo, so the tier stays green and the limitation is printed in every run.
+test('known limitation: the first line under the card changed in place as well, so the insertion floats past it and the columns stay in one lane', { todo: 'the zone reaches down to its gap; same result as 0.1.7' }, () => compareColumns('belowText'))
+
+// A card of plain text, with no screenshot to make the rows above the columns
+// inexact. Here it is the card itself that holds the run of exact rows: the
+// short column has ended, or both columns are blank for a stretch, and the run
+// falls between the two columns' new lines. The cut then makes a stable band of
+// it inside one conflict, and the parts it leaves do not add up to the conflict
+// - one holds the gap with no substituted rows beside it, the other the
+// substituted rows with no gap. laneAlign has to put the conflict back together
+// and prove the wider answer on the pixels; without that these pages come out
+// as a full-width added stripe over one false changed blob (see widenedZones).
+test('a card of plain text whose short column ended: the run of exact rows between the two changes does not lose the lanes', () => compareColumns('noShot'))
+
+test('a card of plain text with a blank stretch across both columns: the run inside the conflict does not move the lanes onto the wrong rows', () => compareColumns('blankStretch'))
+
+test("a list's markers stay with the lines they mark: the lane cut falls in the gutter, not between marker and line", () => compareColumns('markers'))
+
+test('a pane that is empty where the pane beside it gained a row: the row is added in its own pane', () => compareColumns('emptyPane'))
+
+// The same pair, on the one thing the pixel count cannot arbitrate. The run of
+// exact rows between the insertion and the left pane's block of text ends the
+// conflict zone inside the conflict: the block below the run keeps a zone and
+// finds the panes' gutter, the insertion above it is left with no zone at all,
+// and the parts therefore report it as rows added across the whole page -
+// across a pane whose two captures are the same bytes. exactContentCells cannot
+// see that harm. An empty pane carries no content to mis-pair, so laying the
+// insertion over it costs the parts nothing, while the wider answer's lane over
+// it earns nothing: measured here the parts pair 227 content cells exactly and
+// the wider answer 197, a vote of 30 against the right answer. What separates
+// them is the shape of the band, not its pixel count, and that is what
+// laneAlign's `stripes` term reads. Delete it and this test reports
+// `added 74,164 812x22` over a pane where nothing changed.
+test('an insertion beside a pane that is empty there is not reported across that pane', async () => {
+  const [a, b] = COLUMNS_PAIRS.emptyPane
+  const baseline = createColumnsPage(a)
+  const candidate = createColumnsPage(b)
+  const m = baseline.manifest
+  // Ground truth, read off the two pages rather than frozen: every column left
+  // of the gutter is the same pixel in both, and the right pane gained one row.
+  const pane = { x: 0, y: 0, w: m.gutter.start, h: m.height }
+  assert.ok(imagesEqual(cropImage(baseline.image, pane), cropImage(candidate.image, pane)), 'the left pane must be identical in both pages')
+  assert.deepEqual(columnChanges(m.left, candidate.manifest.left, m.pitchLeft), { added: [], edited: [] })
+  const grew = columnChanges(m.right, candidate.manifest.right, m.pitchRight)
+  assert.equal(grew.added.length, 1)
+
+  const r = await engine.compare(baseline.image, candidate.image)
+  // No block of rows is reported added or removed across the whole width: that
+  // band is the shape the lanes exist to avoid, and on this page it can only lie
+  // over the pane that did not change.
+  assert.deepEqual(
+    r.alignment.bandMap.filter((band) => band.kind !== 'matched' && !band.columns).map((band) => `${band.kind} ${band.baseline.start}-${band.baseline.end}`),
+    [],
+    describe(r),
+  )
+  // The lanes are the two panes: a lane boundary stands in the gutter between them.
+  assert.ok(
+    r.alignment.bandMap.some((band) => band.columns && band.columns.start >= m.gutter.start && band.columns.start <= m.gutter.end),
+    describe(r),
+  )
+  // and the one added region stands in the right pane, on the rows the new line occupies
+  const added = ofKind(r, 'added')
+  assert.equal(added.length, 1, describe(r))
+  const box = added[0]!.boxCandidate!
+  assert.ok(box.x >= m.gutter.start, describe(r))
+  assert.ok(box.w < m.card.w, describe(r))
+  assert.ok(Math.abs(box.y - grew.added[0]!.y) <= 2 && Math.abs(box.h - grew.added[0]!.h) <= 2, describe(r))
+  assert.equal(ofKind(r, 'removed').length, 0, describe(r))
+  assert.equal(ofKind(r, 'changed', 0.1).length, 0, describe(r))
+})
+
+test('the committed columns fixtures are what synth.ts draws now', async () => {
+  // A6 compares test/fixtures/images/columns-base.png against columns-grown.png and reads its ground
+  // truth from manifest.json; this tier draws COLUMNS_PAIRS.stripes live. Only `npm run fixtures` keeps
+  // the two the same case, and no CI job runs it. Pixels, not bytes: a change in zlib or in the PNG
+  // writer must not redden this.
+  const dir = path.resolve('test/fixtures/images')
+  const drawn = COLUMNS_PAIRS.stripes.map((options) => createColumnsPage(options))
+  for (const [i, name] of ['columns-base', 'columns-grown'].entries())
+    assert.ok(imagesEqual(await readImageFile(path.join(dir, `${name}.png`)), drawn[i]!.image), `${name}.png is stale: run npm run fixtures`)
+  const expect = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')).cases['columns-grown'].expect
+  const m = drawn[0]!.manifest
+  assert.deepEqual(expect.left, columnChanges(m.left, drawn[1]!.manifest.left, m.pitchLeft))
+  assert.deepEqual(expect.right, columnChanges(m.right, drawn[1]!.manifest.right, m.pitchRight))
+  assert.deepEqual(expect.gutter, m.gutter)
+  assert.deepEqual(expect.shot, m.shot)
+  assert.equal(expect.gridY, m.gridY)
+})
+
+test('a screenshot changed in place with a lone insertion far below it: the page is compared full width, not in lanes', async () => {
+  // The rows the widened retry must turn down. From the rows alone this page is
+  // the same shape as the card above: the screenshot was redrawn in place, so the
+  // cut divides the rows over it into runs, and the insertion's gap is orphaned
+  // between two of them. Nothing moved sideways, though, so the lanes explain
+  // fewer pixels than the full-width rows and the vote keeps the rows.
+  const [a] = COLUMNS_PAIRS.grown
+  const baseline = createColumnsPage(a)
+  const candidate = createColumnsPage({ ...a, shot: 'b' })
+  const block = createImage(baseline.image.width, 120, [255, 255, 255, 255])
+  fillRect(block, { x: 120, y: 16, w: 700, h: 88 }, [254, 226, 226, 255])
+  const at = baseline.manifest.card.y + baseline.manifest.card.h + 120
+  const r = await engine.compare(baseline.image, insertRows(candidate.image, at, block))
+  assert.equal(r.alignment.bandMap.filter((b) => b.columns).length, 0, describe(r))
+  assert.equal(ofKind(r, 'removed').length, 0, describe(r))
+  const added = ofKind(r, 'added')
+  assert.equal(added.length, 1, describe(r))
+  assert.ok(Math.abs(added[0]!.anchorBaseline!.y - at) <= 40, describe(r))
+  // the screenshot's own change is reported where it is, inside the screenshot
+  const changed = ofKind(r, 'changed')
+  assert.ok(changed.length > 0, describe(r))
+  assert.ok(changed.every((x) => x.boxBaseline!.y >= baseline.manifest.shot.y && x.boxBaseline!.y + x.boxBaseline!.h <= baseline.manifest.shot.y + baseline.manifest.shot.h), describe(r))
 })

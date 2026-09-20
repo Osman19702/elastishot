@@ -6,6 +6,128 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-20
+
+Comparison results move in this release. Pages where side-by-side columns grow
+by different amounts are reported differently, and almost always better: over a
+230-pair corpus of real captures, 25 pairs changed for the better, 201 are
+identical to 0.1.7, and 4 lost a little (all of them comparisons of two
+unrelated screens, already below 0.75 similarity). If you gate a pipeline on a
+similarity threshold, or keep approved baselines, re-check them once after
+upgrading.
+
+### Fixed
+
+- **A card whose columns grow unevenly is no longer reported as stripes across
+  the whole card.** Take a card with a picture on top and two columns of text
+  below it, where the picture is redrawn at the same size and the columns grow
+  by different amounts. Where both columns grew, the report showed full-width
+  bands of added and removed rows straight across the card, seven and eighteen
+  rows at a time. Where only one grew, its growth became a single added block
+  the width of both columns at the foot of the card, and the lines above it —
+  which had only moved down — were reported as one changed block.
+
+  Each column now gets a lane of its own: the new lines are added regions in
+  their own column where they stand, lines edited in place are small changed
+  regions, nothing is reported as removed, and the picture's change stays
+  inside the picture.
+
+  The cause was that the stretch of rows treated as a column conflict grew
+  upward too far. It was judged over a whole band at a time, and the redrawn
+  picture dragged that band below the threshold, so the conflict was taken to
+  reach the top of the page. Over that height the heading and the picture lie
+  across the card's gutter, so the only blank columns left were the ones beside
+  a fixed nav rail, and the lane to the left of it still held both columns.
+  A conflict now ends at the nearest run of 48 unchanged rows, wherever that
+  run sits.
+
+  Such a run is not always the end of a conflict, though: one appears inside a
+  card whenever the shorter column has ended while the other still moves. Where
+  cutting there would leave the parts unable to explain the change, the whole
+  conflict is measured a second time as one, and the two readings are compared
+  on how many pixels each actually accounts for.
+
+  Scenario A6 holds this case at the command line. Its committed pair comes out
+  of the released 0.1.7 as three 22-row stripes across the card — added, then
+  removed, then added — and comes out here as three added blocks, each inside
+  its own column, with nothing removed. The UI lab gained builds 9 and 10 for
+  the same case. No other lab pair moved.
+
+- **The page below such a card is no longer torn along the lane cut.** When one
+  column gained more rows than the card around it grew, the viewer drew
+  everything below the card lower on one side of the cut than the other — 15
+  rows on the lab's hero, and 103 rows on the card above once its columns had a
+  lane each. The lanes are now brought level again where the last gap of the
+  stretch ends, with padding that carries no tint and no region box, so the card
+  has one bottom edge and the page below it is one picture.
+
+  Two stretches of a page whose lanes are cut at different columns no longer
+  draw over each other; a pixel of difference was enough. Gap fills are also
+  drawn unsmoothed now, so a fill no longer fades the neighbouring gaps' colours
+  in at its top and bottom edge.
+
+- **Blank rows that a column closes up or opens up are no longer shown as
+  changes.** At the foot of the card above, the candidate side showed a red
+  103-row block across the left lane and the baseline side a green 62-row block
+  across the right one — neither with a box to click, in a report whose header
+  said `removed 0`. The diff view painted the green one as solid changed, and
+  the Structure list called them "103 rows removed" and "62 rows inserted" with
+  no element behind either.
+
+  Those rows are only what the two columns need to end level. They are now drawn
+  like the padding beside them: filled, untinted, not marked changed, and listed
+  as "103 blank rows closed up". Content the page really gained or lost keeps its
+  tint, its diff colour and its box.
+
+- **A highlight box is no longer drawn over the block beneath it.** Whenever a
+  changed line ended on the row a gap starts at — the common case, because the
+  gap is cut directly below the line that changed — the box's bottom edge was
+  measured one row too far and swallowed the whole gap. On the pages this
+  release was written for, a 33-row changed box was drawn 52 rows tall over the
+  added block below it, and a 15-row box was drawn 108 rows tall. A box that
+  genuinely spans a gap still keeps both edges.
+
+- **A narrow sliver of content no longer joins the wrong side.** A strip too
+  narrow to be a lane of its own — the tail of a long line, or a column of list
+  markers — joins the span after it, since a marker precedes the text it belongs
+  to and may stand further from it than a gutter is wide. It joins the span
+  behind it only where the gap behind is clearly narrower, by a factor of three.
+  Below that margin the answer is guesswork, and the guess used to cut a
+  paragraph in two.
+
+### Added
+
+- **`blank: true` on a band in `alignment.bandMap`.** A column that grows more
+  than the card around it leaves fewer rows of padding under it, and the column
+  beside it more. Those rows are real and they are in the band map, but nothing
+  was added or removed there. The engine has always refused them a region; now
+  it says so, and a consumer can tell padding a lane closed up from a block that
+  went away. Blank rows across the full width are not marked — nothing else can
+  have moved them, so they remain a spacing change and keep their
+  `whitespace-only` region. The field is omitted when it does not apply and the
+  schema stays `elastishot.report/1`.
+
+- **`ELASTISHOT_BIN` points the acceptance suite at another build**, so a new
+  scenario can be shown to fail against an installed release before it is
+  trusted here. It prints the binary it is using, and `npm run test:all` refuses
+  to run while it is set.
+
+### Known limitations
+
+- Where the first line of text under the card changed in place as well, and only
+  blank rows lie between that line and the card's foot, the insertion floats past
+  it, the line falls inside the conflict, and the columns stay in one lane. The
+  result is what 0.1.7 reported. The engine suite carries this as a `todo` that
+  prints its symptom on every run.
+- A column that grows with no net change to the page height still forms no
+  conflict at all, so its columns are not separated.
+- On a page with a side rail, where a block is inserted across the full width
+  of a card but not of the page, the second reading can be preferred on the
+  strength of the full-width block alone and assign the new rows to the rail's
+  lane. The rail is then reported as changed and moved although it only shifted
+  down. The result is what 0.1.7 reports, so nothing regressed, but the
+  improvement this release brings elsewhere is not reached on that shape.
+
 ## [0.1.7] - 2026-09-16
 
 ### Fixed
@@ -167,7 +289,8 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Osman19702/elastishot/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/Osman19702/elastishot/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Osman19702/elastishot/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/Osman19702/elastishot/compare/v0.1.4...v0.1.5

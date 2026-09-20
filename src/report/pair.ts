@@ -36,27 +36,40 @@ function regionRow(r: DiffRegion, locators: RegionLocators | undefined): string 
  * One line per block of rows that only one side has, with the element behind
  * it: the plain-language answer to "why is the similarity 65% when one card
  * was added".
+ *
+ * A blank band of one column is not such a block. It is the padding that
+ * column's own growth opened or closed so the columns end level again, the
+ * engine reports no region for it, and the viewer leaves it untinted: the
+ * line says that instead of claiming rows were added or removed in a report
+ * whose header says removed 0.
  */
 function structureSection(p: PairReport, byRegion: Map<string, RegionLocators>): string {
   const bands = p.alignment?.bandMap ?? []
   const gaps = bands.map((band, index) => ({ band, index })).filter(({ band }) => band.axis === 'y' && band.kind !== 'matched')
   if (!gaps.length) return ''
+  const levelled = gaps.filter(({ band }) => band.blank && band.columns)
   const items = gaps.map(({ band, index }) => {
     const inserted = band.kind === 'inserted'
     const rows = inserted ? band.candidate.end - band.candidate.start : band.baseline.end - band.baseline.start
+    const lane = band.columns ? ` in columns ${band.columns.start}–${band.columns.end}` : ''
+    if (band.blank && band.columns) {
+      return `<li class="levelled"><span class="muted">${rows} blank rows ${inserted ? 'opened up' : 'closed up'}</span> at baseline row ${band.baseline.start}${lane}</li>`
+    }
     const owners = p.regions
       .filter((r) => r.band === index && r.kind === (inserted ? 'added' : 'removed'))
       .map((r) => byRegion.get(r.id))
       .map((l) => (inserted ? l?.candidate : l?.baseline) ?? null)
       .filter((ref, i, all): ref is NonNullable<typeof ref> => ref !== null && all.findIndex((x) => x?.locator === ref.locator) === i)
     const who = owners.length ? `: ${owners.slice(0, 3).map((o) => `${escapeHtml(displayName(o.name, 50))} ${locatorCell(o.locator)}`).join(', ')}` : ''
-    const lane = band.columns ? ` in columns ${band.columns.start}–${band.columns.end}` : ''
     return `<li><span class="k-${inserted ? 'added' : 'removed'}">${rows} rows ${inserted ? 'inserted' : 'removed'}</span> at baseline row ${band.baseline.start}${lane}${who}</li>`
   })
   const delta = (p.candidate.size?.height ?? 0) - (p.baseline.size?.height ?? 0)
   const height = delta ? ` The candidate is ${Math.abs(delta)} px ${delta > 0 ? 'taller' : 'shorter'}.` : ''
+  const levelling = levelled.length
+    ? ' Blank rows that opened up or closed up in one column only are the padding that column\'s own growth needed for the columns to end level again: nothing was added or removed there, so they carry no region and no tint.'
+    : ''
   return `<h2>Structure</h2>
-<p class="muted">Blocks of rows that exist on one side only.${height} Rows below each block moved with it and were compared in place; the viewer shows the blocks as tinted gaps. A block "in columns" belongs to one of several side-by-side columns that moved on their own.</p>
+<p class="muted">Blocks of rows that exist on one side only.${height} Rows below each block moved with it and were compared in place; the viewer shows the blocks as tinted gaps. A block "in columns" belongs to one of several side-by-side columns that moved on their own.${levelling}</p>
 <ul class="structure">${items.join('')}</ul>`
 }
 

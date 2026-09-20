@@ -48,7 +48,7 @@ elastishot/
 ├── test/                             Engine, capture, viewer and workflow tests; synthetic fixtures; fixture site v1/v2
 ├── acceptance/                       Gherkin features A-G with matching *.acceptance.test.js and trace.js
 ├── docs/                             ATDD.md, ELEMENT-MAP.md, EMBEDDING.md, ROADMAP.md, RELEASING.md
-├── examples/ui-lab/                  A localhost page in eight builds with ground truth; scores every run
+├── examples/ui-lab/                  A localhost page in ten builds with ground truth; scores every run
 ├── site/                             The landing page builder (site/dist is generated)
 └── elastishot.config.example.js      Named targets and viewports for the run workflow
 ```
@@ -91,7 +91,7 @@ candidate (png | url) ┘                                 │           ├─ p
 
 1. **Preprocess.** Both images are brought to the same working width (never upscaled) and converted to grey.
 2. **Global align.** ORB keypoints are matched with a ratio test, RANSAC estimates an affine transform, and it is snapped to a similarity (scale + translation) when the fit is uniform. Flat pages fall back to edge-profile correlation, then to a plain resize. The candidate is warped onto a canvas in baseline space, padded so nothing is lost.
-3. **Structural align.** When both captures are the same size and the global transform is a whole-pixel shift, every row is hashed and the two sequences are aligned like lines of text: unique rows anchor the alignment, common prefix and suffix are trimmed, and rows nothing distinguishes are substitutions for the differ. A stretch where side-by-side columns moved independently (one column of a card gained a line) is cut at its gutters into lanes and each lane is aligned on its own; the rows beside such a gap that paired inexactly belong to that stretch. A one-row gap between bands a row apart is layout wobble (text at fractional positions rounds a row up or down) and is folded away. Otherwise, and whenever it explains more pixels, both images are cut into 8 px strips with small signatures and a Needleman-Wunsch alignment with affine gap costs maps baseline rows to candidate rows. Deleted runs become `removed` regions, inserted runs `added` regions, matched runs go to the differ with their offset refined to the pixel.
+3. **Structural align.** When both captures are the same size and the global transform is a whole-pixel shift, every row is hashed and the two sequences are aligned like lines of text: unique rows anchor the alignment, common prefix and suffix are trimmed, and rows nothing distinguishes are substitutions for the differ. A stretch where side-by-side columns moved independently (one column of a card gained a line) is cut at its gutters into lanes and each lane is aligned on its own; the rows beside such a gap that paired inexactly belong to that stretch. The stretch ends at the nearest 48 consecutive rows that pair exactly across the full width, whatever changed in place further away, so a picture redrawn above a card's columns stays outside it; inside, it would lie across the gutter and leave both columns in one lane. Such a run can also fall between a card's two changes, where its short column has ended: the stretch is then divided into parts that are not the conflict, so the whole of it is aligned a second time and the wider answer is kept when it pairs more pixels exactly, or when the parts left a block of rows added or removed across the whole width where it has a lane, and in either case still cuts at the same gutters. A span of content too narrow to be a lane (a column of list markers, the tail of one long line) joins the span after it, and the one behind it only where the gap behind is clearly the narrower of the two. A one-row gap between bands a row apart is layout wobble (text at fractional positions rounds a row up or down) and is folded away. Otherwise, and whenever it explains more pixels, both images are cut into 8 px strips with small signatures and a Needleman-Wunsch alignment with affine gap costs maps baseline rows to candidate rows. Deleted runs become `removed` regions, inserted runs `added` regions, matched runs go to the differ with their offset refined to the pixel.
 4. **Diff.** Matched rows are compared with pixelmatch's YIQ colour distance, tolerant to one-pixel shifts and resampling blends. Specks are removed, connected components are merged into regions and scored.
 5. **Classify.** A removed region whose pixels reappear elsewhere, or a changed region whose baseline content is found at another position, becomes one `moved` region.
 6. **Verdict.** A similarity of 0..1 (a low-confidence alignment can never reach 1), counts per kind, warnings, and pass/fail against the threshold and `failOn`.
@@ -99,11 +99,11 @@ candidate (png | url) ┘                                 │           ├─ p
 
 ## Measured
 
-The UI lab in `examples/ui-lab` renders one page in eight builds and records what each build changes (36 elements: added, changed, moved, expanded, re-drawn, and one column of a two-column hero that grew while the other stayed). Every run is scored against that ground truth. On the current engine:
+The UI lab in `examples/ui-lab` renders one page in ten builds and records what each build changes (43 elements: added, changed, moved, expanded, re-drawn, one column of a two-column hero that grew while the other stayed, and a card whose two columns grew by different amounts under a picture that was redrawn in place). Every run is scored against that ground truth. On the current engine:
 
 | Measure | Result |
 |---|---|
-| planted changes found, named by locator or covered by a region | 36 of 36 |
+| planted changes found, named by locator or covered by a region | 43 of 43 |
 | regions on elements nobody changed, score 0.2 or higher | 1 |
 
 The one remaining region is a stat card whose sparkline was redrawn at a new width after the cards spread out: a real difference, on an element the build did not list. Reproduce it with `node examples/ui-lab/run-lab.mjs --no-video`; the report in `examples/ui-lab/report/index.html` lists every planted change with its verdict and every noise region with its box.

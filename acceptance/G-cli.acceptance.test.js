@@ -61,6 +61,13 @@ test('G5 — --help and --version exit 0', async () => {
   const version = await cli(['--version'])
   assert.equal(version.code, 0)
   assert.match(version.stdout.trim(), /^\d+\.\d+\.\d+/)
+  // The binary the tier drives must be this checkout's. ELASTISHOT_BIN can
+  // point it at an installed release (docs/ATDD.md), which is how a new
+  // scenario is shown to fail before its fix; left set by accident it would
+  // let the whole tier certify a build nobody is about to tag. The CLI reads
+  // the version out of its own package.json, so this is the tripwire.
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(version.stdout.trim(), pkg.version, `the CLI under test reports ${version.stdout.trim()}, this checkout is ${pkg.version} — is ELASTISHOT_BIN set?`)
 })
 
 test('G6 — run honours --threshold and --fail-on', async () => {

@@ -13,7 +13,7 @@ import type { Band, Box } from '../../core/types.ts'
 import type { Mat } from '../cv/cv-types.ts'
 import { colEnergy, edgeMagnitude, roi, rowEnergy } from '../cv/ops.ts'
 import type { GlobalAlignOutput, StructuralAlignOutput, Warped, WorkingRegion } from '../model.ts'
-import { conflictZones, foldWobble, GUTTER_EDGE_SHARE, laneTiles, mergeContiguous, splitSubstitutedEdges } from '../pure/lanes.ts'
+import { conflictZones, foldWobble, GUTTER_EDGE_SHARE, laneTiles, mergeContiguous, MIN_LANE, splitSubstitutedEdges, widenedZones } from '../pure/lanes.ts'
 import { alignRows, hashRow, NO_ROW } from '../pure/row-align.ts'
 import { gapScore } from '../pure/scoring.ts'
 import { alignSequences, MAX_CELLS, opsToRuns, repairSubstitutions, type Run } from '../pure/sequence-align.ts'
@@ -284,8 +284,45 @@ function laneHashes(rgba: Uint8Array, gray: Uint8Array, width: number, y0: numbe
  * and aligned on their own, and the lane bands replace the zone's bands when
  * they pair at least as many content cells exactly. Everything outside the
  * zones keeps its full-width bands.
+ *
+ * A run of exact rows inside a conflict ends the zone wherever it sits, and
+ * the rows themselves cannot tell such a run apart from the one that really
+ * does separate two conflicts (see splitSubstitutedEdges). So where a run
+ * divided a conflict, the whole conflict is re-aligned a second time and the
+ * two answers are put to the pixels: the wider one is kept when it pairs more
+ * content cells exactly than the parts do over the same rows, or when the
+ * parts left a block of rows added or removed across the whole width where it
+ * has a lane. Where the parts did explain every gap with lanes of their own,
+ * the wider answer must also keep every gutter they cut at, so a card's gutter
+ * found in a short zone is not given up for a page gutter found in a long one.
+ *
+ * Be careful reading that last guard: it is reachable only on the cell branch.
+ * Explaining every gap and leaving a full-width block are mutually exclusive
+ * by construction, so on the full-width branch the only condition that does any
+ * work is that the wider answer's lanes won their own vote - and that vote
+ * accepts a tie. Measured over the corpus, the gutter guard was never consulted
+ * on a widened stretch that the full-width branch decided. The branch is kept
+ * because the cell vote is blind to the harm it exists to prevent: laying one
+ * pane's insertion across a pane that is nearly empty costs nothing to pair,
+ * so the pixels cannot see a stripe the eye reads at once. It is narrow in
+ * effect - inside a widened range the wider answer is the one the cut took
+ * away, so it only ever hands such a stretch back - but it is not narrow in
+ * principle, and a page with a side rail and a full-card-width insertion can
+ * lose a better answer to it (see the known limitations in CHANGELOG.md).
+ * test/engine/compare.test.ts pins the branch on a page where the cell vote
+ * runs 227 to 197 against the right answer.
  */
 const bandTag = (b: Band): string => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}~${b.similarity.toFixed(2)}${b.columns ? `[${b.columns.start}-${b.columns.end}]` : ''}`
+
+/** What the lanes made of one zone: the bands to use for it, where they were cut, and whether the lanes won the vote. */
+interface ZoneLanes {
+  bands: Band[]
+  cuts: number[]
+  laned: boolean
+}
+
+/** A block of rows one side only has, across the whole width: the shape the lanes exist to avoid. */
+const stripe = (list: readonly Band[]): boolean => list.some((b) => b.kind !== 'matched' && !b.columns)
 
 function laneAlign(input: GlobalAlignOutput, rowBands: Band[], exact: RowExact, edges: { baseline: Mat; warped: Mat }, stripPx: number, debug?: (...args: unknown[]) => void): Band[] {
   if (!rowBands.some((b) => b.kind !== 'matched')) return rowBands
@@ -302,16 +339,16 @@ function laneAlign(input: GlobalAlignOutput, rowBands: Band[], exact: RowExact, 
   const blurW = W.grayBlur.data
   // The rows beside a gap that paired inexactly belong to the zone; the
   // row alignment's own hashes say which rows those are.
-  const bands = splitSubstitutedEdges(rowBands, exact)
+  const cutRuns = new Set<Band>()
+  const bands = splitSubstitutedEdges(rowBands, exact, cutRuns)
   const zones = conflictZones(bands)
-  if (debug && bands.length !== rowBands.length) debug('split', { before: rowBands.map(bandTag), after: bands.map(bandTag), zones })
-  if (!zones.length) return rowBands
-  const out: Band[] = []
-  let cursor = 0
-  for (const zone of zones) {
-    out.push(...bands.slice(cursor, zone.from))
-    cursor = zone.to
-    const zoneBands = bands.slice(zone.from, zone.to)
+  const wider = widenedZones(bands, zones, cutRuns)
+  if (debug && bands.length !== rowBands.length) debug('split', { before: rowBands.map(bandTag), after: bands.map(bandTag), zones, wider })
+  if (!zones.length && !wider.length) return rowBands
+  const cells = (list: Band[]): number => exactContentCells(list, blurB, blurW, width, B.height, W.height, pad)
+
+  const laneZone = (zoneBands: Band[]): ZoneLanes => {
+    const plain: ZoneLanes = { bands: zoneBands, cuts: [], laned: false }
     const z0 = Math.max(0, Math.min(...zoneBands.map((b) => b.baseline.start)))
     const z1 = Math.min(B.height, Math.max(...zoneBands.map((b) => b.baseline.end)))
     // The candidate's rows and columns on the canvas come from the warp's
@@ -321,10 +358,7 @@ function laneAlign(input: GlobalAlignOutput, rowBands: Band[], exact: RowExact, 
     const c0 = Math.max(Math.ceil(W.extent.top), Math.min(...zoneBands.map((b) => b.candidate.start)))
     const c1 = Math.min(Math.floor(W.extent.bottom), W.height - pad, Math.max(...zoneBands.map((b) => b.candidate.end)))
     const [cx0, cx1] = coveredColumns(cov, width, ((c0 + c1) >> 1) + pad)
-    if (z1 - z0 < 2 || c1 - c0 < 2 || cx1 - cx0 < 2) {
-      out.push(...zoneBands)
-      continue
-    }
+    if (z1 - z0 < 2 || c1 - c0 < 2 || cx1 - cx0 < 2) return plain
     // Gutters: columns with no edge in (nearly) every row of the zone on both
     // sides. A card background differs from the page background, so colour
     // is no criterion; a border line crossing the column is allowed for.
@@ -343,10 +377,7 @@ function laneAlign(input: GlobalAlignOutput, rowBands: Band[], exact: RowExact, 
     const blank = new Uint8Array(width)
     for (let x = 0; x < width; x++) blank[x] = edgeRows[x]! <= allowed ? 1 : 0
     const tiles = laneTiles(blank, width)
-    if (tiles.length < 2) {
-      out.push(...zoneBands)
-      continue
-    }
+    if (tiles.length < 2) return plain
     const laneBands: Band[] = []
     for (const tile of tiles) {
       // Hash only the columns the candidate covers; the tile keeps its full width.
@@ -371,13 +402,81 @@ function laneAlign(input: GlobalAlignOutput, rowBands: Band[], exact: RowExact, 
       // half a pixel lower) still get their offset refined to the pixel.
       laneBands.push(...refineOffsets(tileBands, B, W, stripPx, true))
     }
-    const viaLanes = exactContentCells(laneBands, blurB, blurW, width, B.height, W.height, pad)
-    const viaRows = exactContentCells(zoneBands, blurB, blurW, width, B.height, W.height, pad)
+    const viaLanes = cells(laneBands)
+    const viaRows = cells(zoneBands)
     if (debug) debug('lanes', { zone: [z0, z1, c0, c1], tiles, viaLanes, viaRows, bands: laneBands.map((b) => `${b.kind[0]}${b.baseline.start}-${b.baseline.end}@${b.offset}[${b.columns!.start}-${b.columns!.end}]`) })
-    if (viaLanes >= viaRows) out.push(...laneBands)
-    else out.push(...zoneBands)
+    if (viaLanes < viaRows) return plain
+    return { bands: laneBands, cuts: tiles.slice(1).map((t) => t.start), laned: true }
   }
-  out.push(...bands.slice(cursor))
+
+  const narrow = zones.map((z) => laneZone(bands.slice(z.from, z.to)))
+  const widerAt = new Map(wider.map((w) => [w.from, w]))
+  const out: Band[] = []
+  let i = 0
+  let zi = 0
+  while (i < bands.length) {
+    const w = widerAt.get(i)
+    if (w) {
+      // What the parts made of these rows: each zone's own answer, and the
+      // bands of every gap no zone took.
+      const parts: Band[] = []
+      const inner: ZoneLanes[] = []
+      let j = i
+      let k = zi
+      while (j < w.to) {
+        const z = zones[k]
+        if (z && z.from === j) {
+          inner.push(narrow[k]!)
+          parts.push(...narrow[k]!.bands)
+          j = z.to
+          k++
+          continue
+        }
+        parts.push(bands[j]!)
+        j++
+      }
+      const whole = laneZone(bands.slice(w.from, w.to))
+      // The parts explained the conflict when every one of them found lanes
+      // and no gap was left outside a zone; then the wider answer has to keep
+      // the gutters they cut at, or it is a page gutter passing for a card's.
+      // A gutter is kept when the wider answer cuts within MIN_LANE of it: no
+      // lane fits in between, so the two cuts part the same columns, and the
+      // midpoint of one gutter does move a few pixels when a zone's rows
+      // change under it.
+      const explained = inner.length > 0 && !w.orphan && inner.every((p) => p.laned)
+      const keeps = inner.every((p) => p.cuts.every((x) => whole.cuts.some((y) => Math.abs(x - y) < MIN_LANE)))
+      const worth = whole.laned && (!explained || keeps)
+      const viaWhole = worth ? cells(whole.bands) : 0
+      const viaParts = worth ? cells(parts) : 0
+      // A block of rows the parts report added or removed across the whole
+      // width, inside a stretch the cut divided, is the symptom itself: one
+      // part found no lanes, so its gap has no column to belong to and is laid
+      // across the page. Where the wider answer gives those rows a lane and
+      // its lanes won their own vote, it is kept even when the parts pair a
+      // few more cells. They can: a pane that is nearly empty carries no
+      // content to pair, so laying the other pane's insertion across it costs
+      // the parts nothing there and earns them the pane that did move, while
+      // the wider answer's lane over the empty pane scores almost nothing for
+      // being right. Inside a widened range the wider answer is the one the
+      // cut took away, so this only ever hands such a stretch back.
+      const stripes = stripe(parts) && !stripe(whole.bands)
+      const take = worth && (viaWhole > viaParts || stripes)
+      if (debug) debug('widen', { zone: [w.from, w.to], orphan: w.orphan, explained, keeps, cuts: whole.cuts, viaWhole, viaParts, stripes, take })
+      out.push(...(take ? whole.bands : parts))
+      i = w.to
+      zi = k
+      continue
+    }
+    const z = zones[zi]
+    if (z && z.from === i) {
+      out.push(...narrow[zi]!.bands)
+      i = z.to
+      zi++
+      continue
+    }
+    out.push(bands[i]!)
+    i++
+  }
   return mergeContiguous(out)
 }
 
@@ -710,6 +809,11 @@ function contentColumns(edge: Mat, gray: Mat, y0: number, y1: number, bg: number
   return { x0: Math.max(0, x0 - CONTENT_PAD), x1: Math.min(cols.length, x1 + CONTENT_PAD) }
 }
 
+/**
+ * One region per block of content in an inserted or deleted band, and the
+ * `blank` mark on the lane gaps that hold no such block. The bands are the
+ * ones the stage returns, so the mark reaches the band map.
+ */
 function gapRegions(ctx: StageContext, input: GlobalAlignOutput, bands: Band[], edges: { baseline: Mat; warped: Mat }): WorkingRegion[] {
   const B = input.baseline
   const pad = input.warped.padTop
@@ -747,7 +851,13 @@ function gapRegions(ctx: StageContext, input: GlobalAlignOutput, bands: Band[], 
     // rows of a neighbouring line: content parts that short are slivers, and
     // a gap made only of slivers is padding.
     const kept = own.filter((p) => p.blank || p.y1 - p.y0 >= MIN_PART_ROWS)
-    if (band.columns && !kept.length) return
+    // Nothing is left: the lane's rows hold nothing that could be reported.
+    // Record that on the band, so the viewer and the pair page can call them
+    // the padding they are instead of a block that went away (see Band.blank).
+    if (band.columns && !kept.length) {
+      band.blank = true
+      return
+    }
     for (const part of kept.length ? kept : [{ y0, y1, blank: true }]) {
       const cols = part.blank ? null : contentColumns(edge, gray, part.y0, part.y1, bg)
       const whitespace = cols === null

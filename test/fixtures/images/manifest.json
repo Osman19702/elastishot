@@ -357,6 +357,83 @@
         },
         "note": "one glyph of 1 px strokes (about 33 pixels), like a changed digit"
       }
+    },
+    "columns-base": {
+      "file": "columns-base.png",
+      "width": 1040,
+      "height": 1094,
+      "expect": {
+        "regions": 0,
+        "note": "the baseline of columns-grown, not a variant of base"
+      }
+    },
+    "columns-grown": {
+      "file": "columns-grown.png",
+      "width": 1040,
+      "height": 1160,
+      "expect": {
+        "baseline": "columns-base.png",
+        "removed": 0,
+        "shot": {
+          "x": 80,
+          "y": 96,
+          "w": 800,
+          "h": 300
+        },
+        "gutter": {
+          "start": 456,
+          "end": 500
+        },
+        "gridY": 420,
+        "left": {
+          "added": [
+            {
+              "x": 104,
+              "y": 662,
+              "w": 352,
+              "h": 22
+            },
+            {
+              "x": 104,
+              "y": 794,
+              "w": 352,
+              "h": 44
+            }
+          ],
+          "edited": []
+        },
+        "right": {
+          "added": [
+            {
+              "x": 500,
+              "y": 574,
+              "w": 225,
+              "h": 22
+            }
+          ],
+          "edited": [
+            {
+              "x": 500,
+              "y": 442,
+              "w": 230,
+              "h": 10
+            },
+            {
+              "x": 500,
+              "y": 596,
+              "w": 320,
+              "h": 10
+            },
+            {
+              "x": 500,
+              "y": 794,
+              "w": 271,
+              "h": 10
+            }
+          ]
+        },
+        "note": "against columns-base: the screenshot (shot) changed in place; each column has its added blocks (candidate pixels) and its lines edited in place (baseline pixels); a lane boundary belongs inside gutter, and nothing was removed"
+      }
     }
   }
 }

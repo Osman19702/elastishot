@@ -14,7 +14,9 @@
  * When warped-src is set and alignment.bandMap has inserted or deleted rows,
  * both sides are drawn in one row space (see bands.ts): inserted rows are a
  * tinted gap on the baseline side, deleted rows a gap on the candidate side,
- * and region boxes are mapped into that space.
+ * and region boxes are mapped into that space. Where the page was aligned
+ * lane by lane, a lane that takes fewer rows than the one beside it is
+ * padded, untinted, so the page below the lanes is one picture.
  */
 import type { AlignmentResult, Box, DiffRegion } from '../core/types.ts'
 import type { LocatorReport, RegionLocators } from '../locators/index.ts'
@@ -363,6 +365,8 @@ export class ElastishotViewer extends HTMLElement {
         const x0 = lane.columns?.start ?? 0
         const x1 = lane.columns?.end ?? c.width
         for (const s of lane.layout.segments) {
+          // A blank gap of one lane holds nothing on either side, like the padding that levels the lane beside it: not a change.
+          if (s.blank) continue
           // Rows only one side has changed by definition: white under 'difference' turns black, the changed colour.
           if (s.kind === 'inserted') {
             ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
@@ -403,7 +407,7 @@ export class ElastishotViewer extends HTMLElement {
 
   #drawAligned(lanes: LaneLayout[], w: number): void {
     const height = this.#alignedHeight(lanes)
-    const key = `${this.#baselineImg.src}|${this.#candidateImg.src}|${this.#gapsImg?.src ?? ''}|${w}|${height}|${lanes.map((l) => `${l.columns?.start ?? ''}:${l.layout.segments.map((s) => `${s.kind}${s.aligned.start}`).join(',')}`).join(';')}`
+    const key = `${this.#baselineImg.src}|${this.#candidateImg.src}|${this.#gapsImg?.src ?? ''}|${w}|${height}|${lanes.map((l) => `${l.columns?.start ?? ''}:${l.layout.segments.map((s) => `${s.kind}${s.blank ? 'b' : ''}${s.aligned.start}`).join(',')}`).join(';')}`
     if (key === this.#alignedKey) return
     this.#alignedKey = key
     const styles = getComputedStyle(this)
@@ -437,12 +441,24 @@ export class ElastishotViewer extends HTMLElement {
             // to the gap stretched over it is a barcode when that row holds
             // text, so every column continues the colour it shows most often
             // in the rows around the gap, see gap-fill.ts.
+            // Padding levels a lane with a taller one (see laneLayouts), and a
+            // blank gap of one lane is the padding that lane's own growth
+            // opened or closed: both are filled the same way and left
+            // untinted, nothing was added or removed there.
+            const tint = () => {
+              if (s.kind === 'padding' || s.blank) return
+              ctx.fillStyle = gap
+              ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+            }
             const strip = this.#gapsImg
             if (strip && s.gap !== undefined && s.gap < strip.naturalHeight) {
               const sx = strip.naturalWidth / Math.max(1, img.naturalWidth)
+              // One row stretched over the gap: a smoothing filter would reach into the rows above and below
+              // it, which are other gaps' colours, and fade them in from the gap's top and bottom edges.
+              ctx.imageSmoothingEnabled = false
               ctx.drawImage(strip, Math.round(x0 * sx), s.gap, Math.max(1, Math.round((x1 - x0) * sx)), 1, x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
-              ctx.fillStyle = gap
-              ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+              ctx.imageSmoothingEnabled = true
+              tint()
               return
             }
             const before = segments.slice(0, i).reverse().find((o) => o[side].end > o[side].start)
@@ -468,8 +484,7 @@ export class ElastishotViewer extends HTMLElement {
                 ctx.drawImage(strip, 0, 0, lane, 1, x0, s.aligned.start, lane, s.aligned.end - s.aligned.start)
               }
             }
-            ctx.fillStyle = gap
-            ctx.fillRect(x0, s.aligned.start, x1 - x0, s.aligned.end - s.aligned.start)
+            tint()
             return
           }
           // A warp that cropped the candidate leaves rows outside the image; they stay blank.

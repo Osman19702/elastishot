@@ -25,26 +25,50 @@ test('A2 — A collapsed section is reported as removed', async () => { ... })
 
 `npm run test:trace` (`acceptance/trace.js`) prints the matrix of scenarios against tests and fails when a scenario has no test. A scenario that cannot be automated yet is still written as a test with `{ todo: 'reason' }` so it appears in the matrix.
 
-| Group | Capability | Seam |
-|---|---|---|
-| A | Comparing two images or two pages | cli |
-| B | Capturing a page with its element map | browser |
-| C | Naming what changed | browser, cli |
-| D | Tracking a URL across deployments | browser, cli |
-| E | Reports that travel | cli |
-| F | Looking at a difference | browser |
-| G | Behaving well in a pipeline | cli |
+| Group | Capability | Seam | Scenarios |
+|---|---|---|---|
+| A | Comparing two images or two pages | cli | 6 |
+| B | Capturing a page with its element map | browser | 3 |
+| C | Naming what changed | browser, cli | 4 |
+| D | Tracking a URL across deployments | browser, cli | 3 |
+| E | Reports that travel | cli | 5 |
+| F | Looking at a difference | browser | 3 |
+| G | Behaving well in a pipeline | cli | 6 |
+
+30 scenarios, all automated; `npm run test:trace` prints the current matrix.
 
 ## Adding a scenario
 
 1. Write it in the feature file with the next free id of its group. Steps describe what a person does and sees, not module names.
 2. Add the test with the identical title. Drive the CLI through `acceptance/support/cli.js`, the fixture site through `support/site.js`, and reports through `support/browser.js`.
 3. Run `npm run test:acceptance` and `npm run test:trace`.
+4. When the scenario comes from a defect, show that it fails without the fix. `ELASTISHOT_BIN` points the tier at another build's `bin/elastishot.js`, an installed release for one. It redirects **every** scenario of every group, so set it for one command and never for `npm run test:acceptance` or `npm run test:all`. Both forms below were measured to leave nothing behind in the shell:
+
+   ```
+   ELASTISHOT_BIN=/path/to/node_modules/elastishot/bin/elastishot.js node --test --test-name-pattern="A6" acceptance/A-compare.acceptance.test.js
+   ```
+
+   ```powershell
+   cmd /c "set ELASTISHOT_BIN=C:\path\to\node_modules\elastishot\bin\elastishot.js&& node --test --test-name-pattern=A6 acceptance/A-compare.acceptance.test.js"
+   ```
+
+   In PowerShell use the `cmd /c` form above (no space before `&&`, or the value gains a trailing space), not `$env:ELASTISHOT_BIN = '...'`, which stays set for the rest of the session. If you do set it that way, wrap it: `try { $env:ELASTISHOT_BIN = '...'; node --test ... } finally { $env:ELASTISHOT_BIN = $null }`.
+
+   Three things make a leaked variable visible rather than silent: `acceptance/support/cli.js` prints `acceptance: ELASTISHOT_BIN is set, driving <path>` to stderr once per test file, G5 fails when the driven CLI's `--version` is not this checkout's `package.json` version, and `npm run test:trace` — the last step of `npm run test:all` — refuses to run at all.
 
 Keep the acceptance tier small. Permutations of thresholds, options and image sizes belong in the engine or unit tier.
+
+## A scenario that names its condition: A6
+
+A6 came from a real page: a project card with a screenshot across it and two columns of text below, captured before and after a release. Someone compares the two versions. The picture was redrawn in place at the same size, the left column gained lines at two places, the right column gained one line and had three lines edited. They expect to be told which lines were added in which column, to see nothing reported as removed, and to see each edited line as a change no taller than a line.
+
+The title carries the condition, "under a picture that changed in place", because that is the whole difference between passing and failing: with the picture left alone 0.1.7 passed the same pair. The picture's change made the rows above the columns look unsettled as a whole, the stretch that is cut into lanes climbed over the picture to the top of the page, and the columns were never separated. The two columns break their paragraphs on different rows, so a comparison that keeps them in one lane pairs one stretch at the left column's offset and the next at the right column's: on 0.1.7 the scenario fails on the new lines first, with the growth reported as stripes of added rows across the whole card and a removed stripe of the same width between them where two blocks belong to the left column and one to the right; then a line of the left column is reported as changed although every one of its rows only moved; then blocks of rows that exist on one side only lie across the card's gutter. That is the report the defect produced on the real page, and no pair without staggered paragraphs can produce it: everywhere else both columns have ink on every line row, so the two offsets are never further apart than the growth and the stripes cannot alternate.
+
+Its permutations are the twelve pairs of `COLUMNS_PAIRS` in `test/fixtures/synth.ts` and live in the engine tier. A6's own pair is `stripes`; beside it are both columns growing on lines that are not staggered, the control with the picture unchanged, only the left column growing, columns of different line pitch, no nav rail beside the card, a card of plain text whose short column ended, a blank stretch across both columns, a list's markers beside the right column, a second picture under the card redrawn in place, a pane that is empty where the pane beside it gained a row, and — as a `todo`, because it is a known limitation and not a promise — the first line of text under the card redrawn in place. The lab's builds 9 and 10 are the same case in a browser.
 
 ## Fixtures
 
 - `test/fixtures/synth.ts` draws deterministic pages (header, cards with text-like blocks, footer) and variants: zoom, crop, collapse, insert, shift, recolour, move, noise. Engine tests use these so no binary fixtures are needed for the algorithms.
-- `test/fixtures/images/*.png` are committed renders of those variants, regenerated with `npm run fixtures`, used by the CLI and acceptance tests.
+- `test/fixtures/images/*.png` are committed renders of those variants, regenerated with `npm run fixtures`, used by the CLI and acceptance tests. `manifest.json` next to them says what each one holds.
+- `createColumnsPage` in the same file draws a page of its own: a card with a picture across it, two columns of row-unique text lines below the picture and a nav rail beside the card. A `null` line slot reserves its row in the grid and paints nothing, which is how a column breaks a paragraph. `columns-base.png` and `columns-grown.png` are `COLUMNS_PAIRS.stripes` drawn by `npm run fixtures`, and `cases['columns-grown'].expect` in the manifest is the ground truth A6 reads: the picture's box, the gutter, and per column the added blocks and the lines edited in place. No CI job runs `npm run fixtures`, so the engine test "the committed columns fixtures are what synth.ts draws now" holds the committed pixels and that ground truth against what `synth.ts` draws today.
 - `test/fixtures/site/v1` and `v2` are two versions of a small page served by `test/support/static-server.js`: v2 collapses the FAQ, zooms the hero illustration, renames the call to action and adds a footer badge.
