@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Osman19702/elastishot/actions/workflows/ci.yml/badge.svg)](https://github.com/Osman19702/elastishot/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/elastishot)](https://www.npmjs.com/package/elastishot) [![licence: MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
+![A pair report: the header reads similarity 97.1%, added 2, removed 0, changed 4, moved 0, above the Slider, Flip, Blink, Overlay and Diff buttons. In the slider the banner added at the top of the page is a green band with a green outline, and the changed call-to-action button and sparkline are outlined in magenta.](https://raw.githubusercontent.com/Osman19702/elastishot/45712f61833434fcafbfe158ab9beeef480606f5/docs/report.png)
+
 Elastic screenshot comparison for UI change detection. Compare two screenshots, or two versions of a page by URL, and get a report of what changed even when the layout zoomed, a section collapsed, or the viewport changed size. Every difference is named by the DOM locator behind it, not just drawn.
 
 - **Aligns before it compares.** ORB feature matching and RANSAC recover the zoom, shift and stretch between the two images; a band alignment then maps sections that collapsed or expanded. Pixels are only compared where they correspond.
