@@ -99,7 +99,7 @@
     "spike": "node scripts/spike-opencv.mjs"
   },
   "dependencies": {
-    "@techstark/opencv-js": "^4.12.0-release.1",
+    "@techstark/opencv-js": "^5.0.0-release.1",
     "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0"
   },
