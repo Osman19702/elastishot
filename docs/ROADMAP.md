@@ -106,3 +106,7 @@ configured.
 
 Open an issue with a pair of screenshots that Elastishot gets wrong. Real
 pairs move items up this list faster than anything else.
+
+Notes gathered while integrating Elastishot into a mobile and React-Native-web app
+(Expo), with a ranked enhancement list for native screenshots and the capture
+changes a react-native-web page needs, are in [docs/MOBILE.md](MOBILE.md).
