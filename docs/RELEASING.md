@@ -46,3 +46,28 @@ A failed run publishes nothing; fix, delete the tag locally and remotely
 (`git tag -d vx.y.z && git push origin :refs/tags/vx.y.z`), and tag again.
 If npm publish succeeded but the GitHub release step failed, re-run only
 that step: `gh release create vx.y.z elastishot-x.y.z.tgz SHA256SUMS`.
+
+## The GitHub Action
+
+The action lives in its own repository,
+[Osman19702/elastishot-action](https://github.com/Osman19702/elastishot-action),
+because the Marketplace lists one `action.yml` per repository root. After an
+elastishot release:
+
+1. In elastishot-action, set the `version` input's default in `action.yml` to
+   the new version and commit.
+2. Dispatch its Test workflow with `elastishot-ref` set to the release tag. It
+   runs the action on Ubuntu and Windows against that source.
+3. Tag `vx.y.z` and move the minor tag:
+   `git tag vx.y.z && git tag -f vx.y && git push origin vx.y.z && git push -f origin vx.y`.
+4. Publish a GitHub release from `vx.y.z`, ticking "Publish this Action to the
+   GitHub Marketplace". There is no API for this, so it is done in the web UI.
+
+## The Claude Code plugin
+
+The plugin pins an exact elastishot version in its skills and its README. After
+a release, bump it in Osman19702/elastishot-claude-plugin: update the pins
+(`npx elastishot@x.y.z`), raise `version` in `.claude-plugin/plugin.json`, and
+merge. The directory picks the commit up on its schedule; select **Publish** in
+the developer portal if review asks for it. Update the pins in the
+`osman-plugins` marketplace README too.

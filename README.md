@@ -184,7 +184,7 @@ npx elastishot pr --base v2.3.0      # against a tag, a branch or a commit
 - Nothing is written to `baselines/`, and the worktree is removed afterwards. Use `--keep` to inspect it.
 - A server command must listen on `{port}`, or on `$PORT`. A server that falls back to another port when its own is busy (Vite without `--strictPort`) fails the run rather than being compared.
 
-**In a GitHub pull request job** the base is the base side of the merge commit the checkout made, so the check needs `fetch-depth: 2`:
+**In a GitHub pull request job** the base is the base side of the merge commit the checkout made, so the check needs `fetch-depth: 2`. The [elastishot-action](https://github.com/Osman19702/elastishot-action) wraps the steps below, upload and summary link included (`uses: Osman19702/elastishot-action@v0.3`); written out, they are:
 
 ```yaml
 on: pull_request
