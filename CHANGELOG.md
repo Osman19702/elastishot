@@ -6,6 +6,131 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`run` no longer ignores capture flags.** `--full-page`, `--wait-for`,
+  `--hide` and `--no-map` now apply to every target, over the config.
+- **A flag a command does not use is now a usage error** (exit 2) instead of
+  being parsed and dropped. Examples: `run --viewport`, `run --name`, and
+  `--all` anywhere but `approve`. Scripts that passed such flags got nothing
+  from them before; now they are told.
+- **A run made with `--single-file` can be approved.** Candidate files are
+  written for every pair `approve` accepts; the pages still inline every
+  image.
+- **An ad-hoc `compare` no longer breaks a pending `approve`.**
+  - `report.json` now records the command that made the run and the baseline
+    folder it used (`config.command`, `config.baselineDir`).
+  - `approve` without a run folder skips a `latest` that `compare` made, uses
+    the newest run that `run` made, and says so.
+  - It also notes when the run compared against a different baseline folder.
+  - `latest` still points at the newest run of any kind.
+- **`approve <name>` treats a folder as a run only when it holds a
+  `report.json`,** so a target named like a folder in the project is no longer
+  misread.
+- **A delay can carry a unit.** `--wait-for 2000ms` and `waitFor: '2000ms'`
+  are delays; before, they were taken as CSS selectors and timed out.
+
+### Added
+
+- **`elastishot pr`: check a pull request without baselines.**
+  - It checks the base commit out into a temporary git worktree, runs the
+    configured `install` and `build` steps, and serves it next to the working
+    tree, from a folder or with a server command on a port elastishot picked.
+  - It captures every target on both sides in one run with one browser and
+    compares them: no baselines are committed, and font or browser
+    differences between machines cannot creep in.
+  - The base is `--base <ref>`; in a GitHub pull request job, the base side
+    of the merge commit; locally, where the branch left `origin/HEAD`, `main`
+    or `master`.
+  - A page the base does not have is reported as `new` with the reason. A run
+    whose base captured nothing exits 2.
+  - The worktree, the servers and the temporary folder are removed afterwards,
+    on Ctrl-C too. `--keep` leaves them for inspection.
+  - The report records the base and head commits in `context`, and `approve`
+    refuses pr runs.
+  - The new `pr` config block takes `install`, `build`, `serve` and
+    `timeoutMs`; a static site needs none of it.
+- **A Markdown summary:** `summary.md` in the run folder, with one row per pair
+  and the pairs that need a look first. In GitHub Actions the same table is
+  appended to the job summary. `pr` always writes it; `report.markdown: true`
+  turns it on for `run` and `compare`.
+- **`baseUrl` and relative target URLs.** Targets can be paths relative to
+  `baseUrl`, and `run --base-url <url>` points them at another server, such as
+  a local build, for one run.
+- **New public exports.** `elastishot/node` now exports `startStaticServer`
+  (the static server `pr` uses, with an SPA fallback and a base path), the
+  built-in reporters including `markdownReporter`, and `findConfigFile`.
+  `elastishot/report` exports `renderMarkdownSummary`.
+- **`run --update --force`** also replaces baselines that differ from the new
+  capture. Those pairs keep their diff and a "baseline replaced" reason, and
+  the run exits 0.
+- **`compare --no-config`** ignores any config file, so an ad-hoc comparison
+  inside a project neither takes its thresholds nor runs its reporters.
+- **`--viewport` accepts a configured viewport's name.** A `snapshot
+  --viewport 390x844@2` that matches a configured viewport also takes its name,
+  so the baseline lands in the folder `run` reads.
+- **Config discovery:** the config file is found in the current folder or the
+  nearest parent folder, and `elastishot.config.cjs` is recognised.
+- **Capture setup before the page loads.**
+  - `capture.locale` and `capture.timezoneId`.
+  - `capture.clock`, which pins `Date.now()`, or starts a fake clock with
+    `mode: 'install'`. Needs Playwright 1.45 or newer.
+  - `capture.setup(page, context)` in a JS config: seed storage, add cookies,
+    route requests.
+  - `capture.storageState` also takes the state object itself. A file path is
+    now resolved against the config folder rather than the current folder.
+
+  Together these remove the need for a custom capture adapter in most apps
+  that keep state in the browser.
+- **`capture.reducedMotion`:** `'reduce'` stays the default; `'no-preference'`
+  captures an app's animated state.
+- **`capture.animations: 'finish'`** fast-forwards running animations and
+  transitions to their end, so `animationend` and `transitionend` handlers run.
+  The default `'freeze'` turns them off as before. Some components only reach
+  their final state in those handlers; React Native for Web's `Modal` sets
+  `role="dialog"` there.
+- **`expect` per target (and `capture.expect`):** a selector the ready page
+  must show. Without it, the capture fails instead of becoming a baseline of a
+  sign-in page or an empty app shell.
+- **A `CAPTURE_REDIRECTED` warning** when a page ends at another path or origin
+  than the one requested. `meta.json` records the final URL, and the colour
+  scheme, motion setting, locale and time zone of the capture. The pair page
+  shows them.
+- **Ignore by locator.** `ignore: ['[data-testid=clock]', '#ad']`, in the
+  config and per target, looks each locator up in both element maps. It
+  leaves that element's boxes out on each side, wherever the element landed.
+  - It works on existing baselines, because their maps are stored with them.
+  - Locators no map records raise an `IGNORE_UNRESOLVED` warning.
+  - The pair page lists what was ignored.
+
+### Changed
+
+- **Capture options in the config are validated** like the rest of the config.
+  An unknown key or a wrong value is now an `E_CONFIG` error instead of being
+  dropped.
+- **Element maps follow the picture more closely.**
+  - When a page scrolls inside a fixed body, elements below the captured
+    picture are clipped or dropped instead of naming pixels that do not exist.
+  - An `aria-hidden` or `inert` subtree that another layer covers, such as an
+    inactive tab scene mounted under the active one, is left out.
+  - Visible decorative icons stay.
+  - Maps of ordinary pages are unchanged.
+- **opencv.js 5.0** (`@techstark/opencv-js` 5.0.0-release.1, up from 4.12). The
+  UI lab's `report.json` is identical on both versions, region for region and
+  score for score, and stage timings are within run-to-run noise. The install
+  grows from about 13 MB to about 16 MB, and the browser download from 12 MB
+  to 13 MB.
+- The package is now built with TypeScript 7. Apart from quote style on import
+  paths, the emitted JavaScript and type declarations are the same as
+  TypeScript 5.9's.
+- Development and tests use Playwright 1.64.1; the peer range is unchanged.
+
+### Documentation
+
+- `docs/MOBILE.md` is now a general guide to native and React Native
+  screenshots. The native roadmap and the smaller items found in field use are
+  in `docs/ROADMAP.md`.
+
 ## [0.2.0] - 2026-09-20
 
 Comparison results move in this release. Pages where side-by-side columns grow

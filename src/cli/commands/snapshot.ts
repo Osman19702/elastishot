@@ -1,5 +1,5 @@
 import { createElastishot } from '../../node/elastishot.ts'
-import { UsageError, type ParsedArgs } from '../args.ts'
+import { resolveViewportArg, UsageError, type ParsedArgs } from '../args.ts'
 import type { CliIo } from '../main.ts'
 import { captureOptionsFromArgs } from './compare.ts'
 
@@ -9,10 +9,13 @@ export async function snapshotCommand(args: ParsedArgs, io: CliIo): Promise<numb
   if (!/^https?:\/\//i.test(url)) throw new UsageError(`snapshot needs an http(s) URL, got "${url}"`)
   const app = await createElastishot({ cwd: io.cwd, ...(args.config ? { configPath: args.config } : {}) })
   try {
+    // A configured viewport, named or matched by size, keeps its name, so the
+    // baseline lands in the folder `run` reads.
+    const viewport = resolveViewportArg(args, app.config.viewports)
     const { snapshot, dir } = await app.snapshot(url, {
       ...(args.out ? { out: args.out } : {}),
       ...(args.name ? { name: args.name } : {}),
-      ...(args.viewport ? { viewport: args.viewport } : {}),
+      ...(viewport ? { viewport } : {}),
       capture: captureOptionsFromArgs(args),
     })
     const elements = snapshot.elementMap?.elements.length ?? 0

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
@@ -76,4 +76,52 @@ test('validation names the offending key', () => {
   bad({ targets: [{ name: 'x', url: 'https://x', foo: 1 }] }, /unknown key "foo"/)
   bad({ report: { images: 'blob' } }, /report\.images/)
   assert.throws(() => resolveConfig({ viewports: [{ name: 'd', width: 1, height: 1 }], targets: [{ name: 'x', url: 'https://x', viewports: ['tablet'] }] }, '/tmp'), /unknown viewport "tablet"/)
+})
+
+test('the nearest config in a parent folder is found, and a .cjs config loads', async () => {
+  const root = path.join(tmp, 'monorepo')
+  const app = path.join(root, 'packages', 'app')
+  await mkdir(app, { recursive: true })
+  await writeFile(path.join(root, 'elastishot.config.cjs'), "module.exports = { threshold: 0.9, targets: [{ name: 'home', url: 'https://a.test/' }] }\n")
+  const c = await loadConfig(app)
+  assert.equal(c.configPath, path.join(root, 'elastishot.config.cjs'))
+  assert.equal(c.rootDir, root)
+  assert.equal(c.threshold, 0.9)
+  assert.equal(c.baselineDir, path.join(root, 'baselines'))
+})
+
+test('capture options are validated, and targets carry their ignore and expect', () => {
+  const bad = (raw: unknown, re: RegExp) => assert.throws(() => validateConfig(raw), (e: unknown) => isElastishotError(e, 'E_CONFIG') && re.test((e as Error).message))
+  bad({ capture: { locael: 'en-GB' } }, /config\.capture: unknown key "locael"/)
+  bad({ capture: { animations: 'skip' } }, /animations must be "freeze" or "finish"/)
+  bad({ capture: { reducedMotion: 'off' } }, /reducedMotion must be/)
+  bad({ capture: { clock: { time: true } } }, /clock must be/)
+  bad({ capture: { clock: { time: 0, mode: 'slow' } } }, /clock must be/)
+  bad({ targets: [{ name: 'x', url: 'https://x', capture: { waitFor: 1, foo: 1 } }] }, /targets\[0\]\.capture: unknown key "foo"/)
+  bad({ ignore: ['ok', ''] }, /ignore must be an array of locators/)
+  bad({ targets: [{ name: 'x', url: 'https://x', expect: 7 }] }, /expect must be a selector/)
+  const raw = validateConfig({
+    ignore: ['[data-testid=clock]'],
+    capture: { locale: 'en-GB', clock: { time: '2026-01-15T09:41:00Z', mode: 'install' }, animations: 'finish', storageState: { cookies: [], origins: [] } },
+    targets: [{ name: 'home', url: 'https://a.test/', ignore: ['#ad'], expect: '[data-testid="screen-home"]' }],
+  })
+  const [home] = resolveTargets(resolveConfig(raw, '/tmp'))
+  assert.deepEqual(home!.ignore, ['[data-testid=clock]', '#ad'])
+  assert.equal(home!.capture.expect, '[data-testid="screen-home"]')
+  assert.equal(home!.capture.locale, 'en-GB')
+})
+
+test('baseUrl takes relative target URLs; the pr block is validated', () => {
+  const bad = (raw: unknown, re: RegExp) => assert.throws(() => validateConfig(raw), (e: unknown) => isElastishotError(e, 'E_CONFIG') && re.test((e as Error).message))
+  bad({ baseUrl: 'localhost:3000' }, /baseUrl must be an http\(s\) URL/)
+  bad({ targets: [{ name: 'x', url: 'file:///x' }] }, /needs an http\(s\) url, or a path relative to baseUrl/)
+  bad({ pr: { serve: { dir: 'dist', command: 'npm run preview' } } }, /takes a dir or a command, not both/)
+  bad({ pr: { install: { base: 'npm ci', middle: 'x' } } }, /install must be a command, or \{ base, head \}/)
+  bad({ pr: { serve: { ready: { line: 'Local:' } } } }, /ready must be \{ log\?: string, url\?: string \}/)
+  bad({ pr: { deploy: true } }, /config\.pr: unknown key "deploy"/)
+  const c = resolveConfig(validateConfig({ baseUrl: 'https://a.test/app/', pr: { install: 'npm ci', build: { base: 'npm run build', head: false }, serve: { command: 'npx vite preview --port {port} --strictPort', ready: { log: 'Local:' } } }, targets: [{ name: 'home', url: './' }] }), '/tmp')
+  assert.equal(resolveTargets(c)[0]!.url, 'https://a.test/app/')
+  assert.equal(resolveTargets(c, [], { baseUrl: 'http://127.0.0.1:4173/' })[0]!.url, 'http://127.0.0.1:4173/')
+  const noBase = resolveConfig(validateConfig({ targets: [{ name: 'home', url: '/' }] }), '/tmp')
+  assert.throws(() => resolveTargets(noBase), (e: unknown) => isElastishotError(e, 'E_CONFIG') && /needs baseUrl in the config, or --base-url/.test((e as Error).message))
 })

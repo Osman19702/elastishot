@@ -38,7 +38,7 @@ test('G2 — --quiet prints only the summary line', async () => {
 })
 
 test('G3 — Unknown flags, commands and bad values exit 2 with usage', async () => {
-  for (const args of [['compare', 'a', 'b', '--bogus'], ['frobnicate'], ['snapshot', 'http://x', '--viewport', 'huge'], ['compare', 'only-one']]) {
+  for (const args of [['compare', 'a', 'b', '--bogus'], ['frobnicate'], ['snapshot', 'http://x', '--viewport', 'huge'], ['compare', 'only-one'], ['run', '--viewport', '390x844']]) {
     const r = await cli(args)
     assert.equal(r.code, 2, args.join(' '))
     assert.match(r.stderr, /^elastishot: /)

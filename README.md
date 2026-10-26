@@ -11,9 +11,10 @@ Elastic screenshot comparison for UI change detection. Compare two screenshots, 
 - **Names the change.** A Playwright capture records an element map (test id, id, role and name, or CSS path) next to each screenshot; regions are attributed to the smallest element that covers them.
 - **Reports that travel.** A summary page with one card per pair, a detail page per pair with an embeddable `<elastishot-viewer>` (slider, flip, blink, overlay, diff), `report.json` and JUnit XML.
 - **Tracks a URL across deployments.** `snapshot` / `run` / `approve` keep a baseline per target and viewport; the CLI exits non-zero when a deployment drifted.
+- **Checks a pull request without baselines.** `pr` serves the base commit next to your working tree and compares the two in one run, on one machine with one browser, so fonts and rendering match and nothing is committed. In GitHub Actions it writes a table to the job summary.
 - **Modular.** Isomorphic core (runs in Node and the browser through opencv.js WASM), Node-only capture and file layers behind subpath exports, plugin hooks and pluggable reporters.
 
-Elastishot is a Node 20+ library and CLI written in TypeScript, MIT licensed, with no telemetry: the CLI contacts only the URLs you pass it. The install is about 13 MB, nearly all of it the opencv.js WebAssembly build; there is no native compile step.
+Elastishot is a Node 20+ library and CLI written in TypeScript, MIT licensed, with no telemetry: the CLI contacts only the URLs you pass it. The install is about 16 MB, nearly all of it the opencv.js WebAssembly build; there is no native compile step.
 
 ## Quick start
 
@@ -23,6 +24,7 @@ npm install -D playwright && npx playwright install chromium   # only needed for
 npx elastishot compare https://staging.example.com/ https://example.com/ --full-page
 npx elastishot compare before.png after.png
 open .elastishot/runs/<run-id>/index.html
+npx elastishot pr      # this branch against the one it left, both served here (needs a config)
 ```
 
 The first command captures both pages, compares them and writes a run folder. The last line of the output is the path of the summary page. Exit code 1 means differences were found.
@@ -62,10 +64,17 @@ elastishot/
 | `elastishot compare <baseline> <candidate>` | Each side is a baseline folder, a PNG/JPEG path, an image URL or a page URL. Writes a run folder. |
 | `elastishot snapshot <url>` | Captures a page (PNG + element map + meta) as a baseline folder. |
 | `elastishot run [target...]` | Captures and compares every target x viewport from `elastishot.config.*`. |
+| `elastishot pr [target...]` | Compares the working tree with a base commit. Both are served and captured in this run, so no baselines are kept. Writes a run folder and a Markdown summary. |
 | `elastishot approve [target[/viewport]\|runDir]` | Promotes a run's candidate to the baseline; `--all` takes every failed or new pair. |
 | `elastishot report <runDir>` | Re-renders `index.html` and `junit.xml` from a run's `report.json`. |
 
-Options: `--out <dir>`, `--config <file>`, `--name <name>`, `--threshold <0..1>`, `--fail-on added,removed,changed,moved|none`, `--viewport WxH[@dpr]`, `--full-page`, `--wait-for <selector|ms>`, `--hide <selector>` (repeatable), `--no-map`, `--junit`, `--junit-file <file>`, `--single-file`, `--update`, `--all`, `--json`, `--quiet`, `--help`, `--version`. Run `elastishot --help` for the full text.
+Options:
+- **General:** `--out <dir>`, `--config <file>`, `--name <name>`, `--threshold <0..1>`, `--fail-on added,removed,changed,moved|none`, `--json`, `--quiet`, `--help`, `--version`.
+- **Capture:** `--viewport WxH[@dpr]|<name>`, `--full-page`, `--wait-for <selector|ms>`, `--hide <selector>` (repeatable), `--no-map`.
+- **Reports:** `--junit`, `--junit-file <file>`, `--single-file`.
+- **Command-specific:** `--no-config` (compare); `--base-url <url>`, `--update` and `--force` (run); `--base <ref>` and `--keep` (pr); `--all` (approve).
+
+A flag a command does not use is a usage error. Run `elastishot --help` for the full text.
 
 | npm script | What it does |
 |---|---|
@@ -130,10 +139,71 @@ A GitHub Actions job:
 ```yaml
 - run: npm ci && npx playwright install --with-deps chromium
 - run: npx elastishot run --junit
-- uses: actions/upload-artifact@v4
+- uses: actions/upload-artifact@v7
   if: always()
   with: { name: elastishot, path: .elastishot/runs }
 ```
+
+`run --update --force` also replaces baselines that differ: use it when a whole redesign is intended. Target URLs can be paths relative to `baseUrl` in the config, and `run --base-url http://127.0.0.1:4173/` points the same targets at a local build.
+
+## Checking a pull request without baselines
+
+Baselines kept in a repository go stale, and baselines captured on one machine differ from captures on another (fonts, the browser build). `elastishot pr` avoids both:
+1. It checks the base commit out into a temporary git worktree.
+2. It serves that worktree and your working tree side by side.
+3. It captures every target on both, in one run with one browser.
+4. It compares the two.
+
+```js
+// elastishot.config.mjs
+export default {
+  viewports: [{ name: 'desktop', width: 1280, height: 800 }, { name: 'mobile', width: 390, height: 844 }],
+  capture: { fullPage: true },
+  targets: [
+    { name: 'home', url: '/' },
+    { name: 'pricing', url: '/pricing' },
+  ],
+  // A static site needs no pr block: the config folder itself is served.
+  pr: {
+    install: 'npm ci',                 // in the base worktree only
+    build: 'npm run build',            // in both trees
+    serve: { dir: 'dist', spa: true }, // or a command: { command: 'npm run preview -- --port {port} --strictPort' }
+  },
+}
+```
+
+```bash
+npx elastishot pr                    # this branch against where it left origin/HEAD (or main, or master)
+npx elastishot pr --base v2.3.0      # against a tag, a branch or a commit
+```
+
+**How each side runs:**
+- Target URLs are paths. Each side is served on a port of its own, and `baseUrl`, when set, keeps its path.
+- A page the base does not have yet is reported as `new` with the reason; it is not an error.
+- The run folder holds the report, `junit.xml` with `--junit`, and `summary.md`. In GitHub Actions the same table is appended to the job summary.
+- Nothing is written to `baselines/`, and the worktree is removed afterwards. Use `--keep` to inspect it.
+- A server command must listen on `{port}`, or on `$PORT`. A server that falls back to another port when its own is busy (Vite without `--strictPort`) fails the run rather than being compared.
+
+**In a GitHub pull request job** the base is the base side of the merge commit the checkout made, so the check needs `fetch-depth: 2`. The [elastishot-action](https://github.com/Osman19702/elastishot-action) wraps the steps below, upload and summary link included (`uses: Osman19702/elastishot-action@v0.3`); written out, they are:
+
+```yaml
+on: pull_request
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 2 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: npm }
+      - run: npm ci && npx playwright install --with-deps chromium
+      - run: npx elastishot pr --junit --out .elastishot/pr
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with: { name: elastishot, path: .elastishot/pr }
+```
+
+Use `pull_request`, not `pull_request_target`: the second would build code from a fork with access to the repository's secrets.
 
 ## Programmatic use
 
@@ -177,15 +247,16 @@ Images are written as files next to the pages, thumbnails are inlined so `index.
 | Code | Meaning |
 |---|---|
 | 0 | Every pair at or above the threshold with no region of a `--fail-on` kind |
-| 1 | Differences found, or a target without a baseline (unless `--update`) |
-| 2 | Usage error, or a runtime error (browser, engine, unreadable input) |
+| 1 | Differences found, a target without a baseline (unless `--update`), or, for `pr`, a page the base does not have |
+| 2 | Usage error, or a runtime error (browser, engine, unreadable input); for `pr` also git, install, build or server failures, and a base that captured nothing |
 
 ## Troubleshooting
 
 - **"capturing pages needs Playwright"**: `npm install -D playwright && npx playwright install chromium`. Playwright is an optional peer dependency; image-only use does not need it.
 - **Strict Content-Security-Policy**: the animation freeze, `hide` and `mask` styles are applied as a constructed stylesheet, which `style-src` does not govern, so pages without `'unsafe-inline'` capture unchanged.
 - **Dark and light themes**: give a target `capture: { colorScheme: 'dark' }` (emulated `prefers-color-scheme`) and another `'light'`; each becomes its own baseline.
-- **Flaky captures**: freeze what moves. `--hide .cookie-banner`, `--wait-for "[data-testid=ready]"`, `capture.mask` in the config; animations and transitions are already disabled during capture.
+- **Flaky captures**: freeze what moves. Use `--hide .cookie-banner`, `--wait-for "[data-testid=ready]"`, or `capture.mask` in the config; animations and transitions are already disabled during capture. A clock or a live counter can be left out of the comparison with `ignore: ['[data-testid=clock]']`, which follows the element wherever it lands. Pin dates with `capture.clock`.
+- **A page redirected**: a pair carries `CAPTURE_REDIRECTED` when its page ended at another path or origin, such as a sign-in or onboarding gate. Seed the state with `capture.storageState` or `capture.setup`. Give the target an `expect` selector only the real page has, so a redirected capture fails instead of becoming a baseline.
 - **A full-page capture is wider than the viewport**: the page itself is wider (a fixed-width layout); Playwright captures the scrollable area. Use a viewport at least as wide as the page or accept the width.
 - **Too many small regions**: raise `diff.threshold` (default 0.1) in the config `compare` section, or lower `diff.maxRegions`. `diff.antialiasTolerance` defaults to `auto`: 1 px when the candidate had to be resampled (zoom, rotation, fallback alignment) and 0 on same-scale pages, so a changed digit in small text is reported. Set it to a number to force one behaviour.
 - **A captured page was an error page**: the pair carries a `CAPTURE_ERROR_PAGE` warning when the response status was 4xx/5xx, the title looks like an error or redirect notice, or fewer than five elements were found. Check the URL, the wait settings and authentication before trusting the score.
@@ -202,7 +273,7 @@ Images are written as files next to the pages, thumbnails are inlined so `index.
 - Text edits of a few pixels fall below the default colour threshold, and one-pixel line shifts are tolerated on purpose.
 - Locators exist only for DOM content. Canvas, WebGL and cross-origin iframes are opaque; ids generated by frameworks are rejected and those elements fall back to CSS paths, which are brittle across DOM changes.
 - Fixed and sticky elements in a full-page capture sit where the browser painted them at the first position.
-- opencv.js is a 12 MB download in the browser; load it lazily or in a worker, and pass it to `createEngine({ cv })`.
+- opencv.js is a 13 MB download in the browser; load it lazily or in a worker, and pass it to `createEngine({ cv })`.
 
 ## Contributing and security
 

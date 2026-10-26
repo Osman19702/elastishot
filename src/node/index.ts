@@ -41,6 +41,7 @@ export { ELASTISHOT_VERSION } from './version.ts'
 export {
   createElastishot,
   type ApproveCallOptions,
+  type ApproveResult,
   type CompareCallOptions,
   type Elastishot,
   type ElastishotOptions,
@@ -48,9 +49,12 @@ export {
   type RunResult,
   type SnapshotCallOptions,
 } from './elastishot.ts'
+export { htmlReporter, jsonReporter, junitReporter, markdownReporter } from './reporters.ts'
+export { startStaticServer, type StaticServer, type StaticServerOptions } from './static-server.ts'
 export {
   CONFIG_FILES,
   DEFAULT_VIEWPORTS,
+  findConfigFile,
   loadConfig,
   resolveConfig,
   resolveTargets,

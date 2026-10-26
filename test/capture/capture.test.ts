@@ -103,3 +103,70 @@ test('unreachable pages fail with E_CAPTURE', async () => {
   await assert.rejects(capture(`${server.url}/missing/`, { waitFor: '#never', timeoutMs: 1500 }), (e: unknown) => isElastishotError(e, 'E_CAPTURE') || (e as Error).name === 'TimeoutError')
   await assert.rejects(capture('http://127.0.0.1:9/', { timeoutMs: 3000 }), (e: unknown) => isElastishotError(e, 'E_CAPTURE'))
 })
+
+test('locale, time zone, clock and colour scheme reach the page and the meta', async () => {
+  const fixed = Date.parse('2026-01-15T09:41:00Z')
+  let seen: { now: number; language: string; zone: string } | null = null
+  const snap = await capture(`${server.url}/v1/`, {
+    locale: 'en-GB',
+    timezoneId: 'Asia/Tokyo',
+    clock: '2026-01-15T09:41:00Z',
+    colorScheme: 'dark',
+    reducedMotion: 'no-preference',
+    elementMap: false,
+    waitFor: async (page) => {
+      seen = await page.evaluate(() => ({ now: Date.now(), language: navigator.language, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }))
+    },
+  })
+  assert.deepEqual(seen, { now: fixed, language: 'en-GB', zone: 'Asia/Tokyo' })
+  assert.equal(snap.meta.locale, 'en-GB')
+  assert.equal(snap.meta.timezoneId, 'Asia/Tokyo')
+  assert.equal(snap.meta.colorScheme, 'dark')
+  assert.equal(snap.meta.reducedMotion, 'no-preference')
+})
+
+test('setup runs before the page loads, and a missing expect selector fails the capture', async () => {
+  const seeded = await capture(`${server.url}/v1/`, {
+    elementMap: false,
+    setup: async (page) => {
+      // An init script runs before the document has elements; mark it once there is a body.
+      await page.addInitScript(() => {
+        addEventListener('DOMContentLoaded', () => {
+          document.body.dataset.seeded = 'yes'
+        })
+      })
+    },
+    expect: 'body[data-seeded="yes"]',
+  })
+  assert.ok(seeded.png)
+  await assert.rejects(
+    capture(`${server.url}/v1/`, { elementMap: false, expect: 'body[data-seeded="yes"]' }),
+    (e: unknown) => isElastishotError(e, 'E_CAPTURE') && /expected body\[data-seeded="yes"\] on the page/.test((e as Error).message),
+  )
+})
+
+test("animations: 'finish' runs animations to their end; the default freeze cancels them", async () => {
+  const finished = await capture(`${server.url}/anim/`, { animations: 'finish', expect: 'body[data-done="1"]', elementMap: false })
+  assert.ok(finished.png)
+  await assert.rejects(capture(`${server.url}/anim/`, { expect: 'body[data-done="1"]', elementMap: false }), (e: unknown) => isElastishotError(e, 'E_CAPTURE'))
+})
+
+test('a page that redirects records where it ended', async () => {
+  const snap = await capture(`${server.url}/redirect/`, { elementMap: false })
+  assert.equal(snap.meta.url, `${server.url}/redirect/`)
+  assert.equal(snap.meta.finalUrl, `${server.url}/v1/`)
+})
+
+test('an app scrolling inside a fixed body keeps its map inside the picture, without covered aria-hidden scenes', async () => {
+  const snap = await capture(`${server.url}/layers/`, { fullPage: true })
+  const map = snap.elementMap!
+  assert.equal(snap.image.height, 800)
+  assert.ok(map.elements.every((e) => e.box.y + e.box.h <= snap.image.height), 'a box runs past the picture')
+  find(map.elements, '[data-testid="row-1"]')
+  assert.equal(map.elements.some((e) => e.locator === '[data-testid="row-20"]'), false)
+  // the inactive scene is covered by the active one; the visible decorative icon stays
+  assert.equal(map.elements.some((e) => e.locator === '[data-testid="scene-inactive"]' || e.locator === '[data-testid="inactive-text"]'), false)
+  find(map.elements, '[data-testid="icon"]')
+  find(map.elements, '[data-testid="scene-active"]')
+  for (const e of map.elements) if (e.parent !== null) assert.ok(e.parent < e.i, `parent ${e.parent} of ${e.i}`)
+})

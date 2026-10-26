@@ -12,6 +12,10 @@ export type ErrorCode =
   | 'E_CAPTURE'
   | 'E_CONFIG'
   | 'E_USAGE'
+  /** A git command failed: no repository, an unknown ref, a worktree that could not be made. */
+  | 'E_GIT'
+  /** Preparing or serving one side of a pr run failed: install, build or server. */
+  | 'E_SERVE'
 
 export interface ElastishotErrorOptions {
   cause?: unknown

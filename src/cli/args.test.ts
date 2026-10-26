@@ -1,7 +1,50 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { parseCliArgs, parseFailOn, parseViewport, UsageError } from './args.ts'
+import { parseCliArgs, parseFailOn, parseViewport, resolveViewportArg, UsageError } from './args.ts'
+
+const rejects = (argv: string[], message: RegExp) =>
+  assert.throws(() => parseCliArgs(argv), (e: unknown) => e instanceof UsageError && message.test((e as Error).message), argv.join(' '))
+
+test('each command takes only the options it reads', () => {
+  rejects(['run', '--viewport', '390x844'], /--viewport does not apply to run: run captures the viewports in the config/)
+  rejects(['run', '--name', 'x'], /--name does not apply to run/)
+  rejects(['compare', 'a', 'b', '--all'], /--all does not apply to compare \(compare takes --out, /)
+  rejects(['approve', 'home', '--update'], /--update does not apply to approve/)
+  rejects(['snapshot', 'http://x', '--junit'], /--junit does not apply to snapshot/)
+  const run = parseCliArgs(['run', '--full-page', '--hide', '.ad', '--no-map', '--wait-for', '#ready'])
+  assert.equal(run.fullPage, true)
+  assert.deepEqual(run.hide, ['.ad'])
+  assert.equal(run.noMap, true)
+  assert.equal(parseCliArgs(['approve', '--help']).help, true)
+})
+
+test('--force needs --update, --config excludes --no-config, and --wait-for takes ms', () => {
+  rejects(['run', '--force'], /--force only works with --update/)
+  assert.equal(parseCliArgs(['run', '--update', '--force']).force, true)
+  rejects(['compare', 'a', 'b', '--config', 'x.json', '--no-config'], /cannot be used together/)
+  assert.equal(parseCliArgs(['compare', 'a', 'b', '--no-config']).noConfig, true)
+  assert.equal(parseCliArgs(['compare', 'a', 'b', '--wait-for', '2000ms']).waitFor, 2000)
+  assert.equal(parseCliArgs(['compare', 'a', 'b', '--wait-for', '[data-ms]']).waitFor, '[data-ms]')
+})
+
+test('--viewport is WxH or a configured name, and a configured size keeps its name', () => {
+  const configured = [
+    { name: 'desktop', width: 1280, height: 800 },
+    { name: 'mobile', width: 390, height: 844, deviceScaleFactor: 2 },
+  ]
+  const named = parseCliArgs(['snapshot', 'http://x', '--viewport', 'mobile'])
+  assert.equal(named.viewportName, 'mobile')
+  assert.equal(resolveViewportArg(named, configured)?.name, 'mobile')
+  assert.equal(resolveViewportArg(parseCliArgs(['snapshot', 'http://x', '--viewport', '390x844@2']), configured)?.name, 'mobile')
+  assert.equal(resolveViewportArg(parseCliArgs(['snapshot', 'http://x', '--viewport', '390x844']), configured)?.name, '390x844')
+  assert.equal(resolveViewportArg(parseCliArgs(['snapshot', 'http://x']), configured), undefined)
+  assert.throws(
+    () => resolveViewportArg(parseCliArgs(['snapshot', 'http://x', '--viewport', 'tablet']), configured),
+    (e: unknown) => e instanceof UsageError && /configured: desktop, mobile/.test((e as Error).message),
+  )
+  rejects(['snapshot', 'http://x', '--viewport', 'big screen'], /--viewport must look like 1280x800/)
+})
 
 test('commands, positionals and flags parse', () => {
   const a = parseCliArgs(['compare', 'a.png', 'b.png', '--threshold', '0.9', '--fail-on', 'added,removed', '--viewport', '390x844@2', '--full-page', '--hide', '.a', '--hide', '.b', '--json', '--out', 'runs/x', '--wait-for', '250'])
@@ -29,4 +72,17 @@ test('bad input is a UsageError with a helpful message', () => {
   assert.throws(() => parseFailOn('added,blurry'), (e: unknown) => e instanceof UsageError && /blurry/.test((e as Error).message))
   assert.equal(parseFailOn('none'), 'none')
   assert.deepEqual(parseViewport('1280x800'), { name: '1280x800', width: 1280, height: 800 })
+})
+
+test('pr takes a base and --keep, and refuses what only run or compare use', () => {
+  const p = parseCliArgs(['pr', 'home', '--base', 'origin/release', '--keep', '--junit', '--hide', '.clock'])
+  assert.equal(p.command, 'pr')
+  assert.deepEqual(p.positionals, ['home'])
+  assert.equal(p.base, 'origin/release')
+  assert.equal(p.keep, true)
+  rejects(['pr', '--viewport', '1280x800'], /--viewport does not apply to pr: pr captures the viewports in the config/)
+  rejects(['pr', '--update'], /--update does not apply to pr: pr compares with a base commit/)
+  rejects(['run', '--keep'], /--keep does not apply to run/)
+  assert.equal(parseCliArgs(['run', '--base-url', 'http://127.0.0.1:4173/']).baseUrl, 'http://127.0.0.1:4173/')
+  rejects(['run', '--base-url', 'localhost:4173'], /--base-url must be an http\(s\) URL/)
 })

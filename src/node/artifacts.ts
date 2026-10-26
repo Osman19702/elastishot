@@ -7,7 +7,7 @@ import path from 'node:path'
 
 import { resizeImage } from '../core/image.ts'
 import type { CompareResult, RasterImage } from '../core/types.ts'
-import type { LocatorReport } from '../locators/index.ts'
+import type { IgnoredElement, LocatorReport } from '../locators/index.ts'
 import { renderPairReport } from '../report/pair.ts'
 import type { PairArtifacts, PairReport, PairStatus } from '../report/schema.ts'
 import { CANDIDATE_FILES, writeSnapshotDir } from './baselines.ts'
@@ -24,6 +24,7 @@ export interface PairWriteInput {
   candidate: ResolvedSide
   result: CompareResult | null
   locators: LocatorReport | null
+  ignored?: IgnoredElement[]
   status: PairStatus
   failReasons: string[]
   error?: string
@@ -70,8 +71,10 @@ export async function writePairArtifacts(runDir: string, input: PairWriteInput, 
       refs[file] = rel(file)
     }
   }
-  // The candidate is stored like a snapshot so `approve` can promote it.
-  if (!inline && input.candidate.snapshot) {
+  // The candidate is stored like a snapshot so `approve` can promote it. A
+  // single-file report still needs those files for pairs `approve` accepts
+  // (a target and a viewport); the pages themselves never reference them.
+  if (input.candidate.snapshot && (!inline || (input.target && input.viewport?.name))) {
     await writeSnapshotDir(dir, { ...input.candidate.snapshot, png: input.candidate.snapshot.png ?? encodePng(input.candidate.image) }, CANDIDATE_FILES)
   }
   if (!inline && input.baseline.elementMap) await writeFile(path.join(dir, 'baseline.map.json'), JSON.stringify(input.baseline.elementMap))
@@ -116,6 +119,7 @@ export async function writePairArtifacts(runDir: string, input: PairWriteInput, 
     ...(input.result ? { summary: input.result.summary, alignment: input.result.alignment } : {}),
     regions: input.result?.regions ?? [],
     ...(input.locators ? { locators: input.locators } : {}),
+    ...(input.ignored?.length ? { ignored: input.ignored } : {}),
     artifacts,
     durationMs: input.durationMs,
   }

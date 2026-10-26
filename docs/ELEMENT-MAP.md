@@ -53,10 +53,13 @@ Written next to a capture as `<image>.map.json` (`baseline.map.json`, `candidate
   "elastishotVersion": "0.1.0",
   "target": "home",
   "viewportName": "desktop",
+  "reducedMotion": "reduce",
   "approvedAt": "2026-09-12T09:00:00.000Z",
   "approvedFrom": "C:/work/.elastishot/runs/2026-09-12T08-59-10Z"
 }
 ```
+
+Captures since 0.3 also record the conditions they ran under: `reducedMotion` always, and `colorScheme`, `locale` and `timezoneId` when they were set. `finalUrl` is recorded when the page ended somewhere other than `url`, after a redirect or client-side routing. Every field is optional, so older snapshots stay valid.
 
 ## Report: `elastishot.report/1`
 
@@ -68,7 +71,7 @@ Written next to a capture as `<image>.map.json` (`baseline.map.json`, `candidate
   "createdAt": "2026-09-12T09:00:00.000Z",
   "elastishotVersion": "0.1.0",
   "runId": "2026-09-12T09-00-00Z",
-  "config": { "threshold": 0.98, "failOn": ["added", "removed", "changed", "moved"] },
+  "config": { "threshold": 0.98, "failOn": ["added", "removed", "changed", "moved"], "command": "run", "baselineDir": "C:/work/baselines" },
   "totals": { "pairs": 1, "passed": 0, "failed": 1, "new": 0, "errors": 0 },
   "pairs": [
     {
@@ -100,6 +103,12 @@ Written next to a capture as `<image>.map.json` (`baseline.map.json`, `candidate
   ]
 }
 ```
+
+Fields added in 0.3, all optional:
+- **`config.command`** records the command that made the run: `compare`, `run` or `pr`. `approve` only promotes from `run`.
+- **`config.baselineDir`** is the baseline folder a `run` compared against.
+- **`context`** appears on runs made by `pr`. It names the base commit and why it was chosen, and the head commit and whether the working tree had changes: `{ "kind": "pr", "base": { "ref": "origin/main", "sha": "…", "rule": "the base side of the pull request merge commit" }, "head": { "sha": "…", "dirty": false } }`.
+- **`ignored`** on a pair lists the elements its `ignore` locators left out. Each entry has its `selector`, `side`, the map `locator` it matched, and its `box`.
 
 Region kinds: `added` (present only in the candidate; `boxBaseline` is null and `anchorBaseline` says where it would sit), `removed` (the mirror), `changed`, `moved` (same content at another position). `score` is a severity 0..1; regions below `minRegionScore` (0.05) never fail a comparison.
 

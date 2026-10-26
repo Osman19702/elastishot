@@ -3,6 +3,7 @@
  * JUnit XML. Pure string rendering; the Node layer decides where files go.
  */
 export { renderJUnit } from './junit.ts'
+export { renderMarkdownSummary, topLocators, type MarkdownOptions } from './markdown.ts'
 export { renderPairReport, type PairOptions } from './pair.ts'
 export {
   buildReport,
@@ -12,6 +13,7 @@ export {
   type PairArtifacts,
   type PairReport,
   type PairStatus,
+  type PrContext,
   type ReportConfig,
   type ReportJson,
   type ReportMeta,

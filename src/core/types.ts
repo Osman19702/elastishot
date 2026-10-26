@@ -176,6 +176,8 @@ export type WarningCode =
   | 'ALPHA_FLATTENED'
   | 'PARTIAL_COVERAGE'
   | 'CAPTURE_ERROR_PAGE'
+  | 'CAPTURE_REDIRECTED'
+  | 'IGNORE_UNRESOLVED'
 
 export interface Warning {
   code: WarningCode
@@ -343,6 +345,8 @@ export interface ElementMap {
 export interface SnapshotMeta {
   schema: 'elastishot.snapshot/1'
   url?: string
+  /** Where the page ended when that differs from `url`: a redirect, or client-side routing. */
+  finalUrl?: string
   capturedAt: string
   viewport?: Size & { deviceScaleFactor?: number }
   dpr: number
@@ -357,6 +361,11 @@ export interface SnapshotMeta {
   viewportName?: string
   approvedAt?: string
   approvedFrom?: string
+  /** Capture conditions, recorded so two snapshots can be told apart. */
+  colorScheme?: 'light' | 'dark'
+  reducedMotion?: 'reduce' | 'no-preference'
+  locale?: string
+  timezoneId?: string
 }
 
 export interface Snapshot {

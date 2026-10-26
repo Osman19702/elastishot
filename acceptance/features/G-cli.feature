@@ -14,7 +14,7 @@ Feature: G — Behaving well in a pipeline
     Then stdout is a single line with the pass and fail counts
 
   Scenario: G3 — Unknown flags, commands and bad values exit 2 with usage
-    When I run with an unknown flag, an unknown command, or a viewport that is not WxH
+    When I run with an unknown flag, an unknown command, a viewport that is neither WxH nor configured, or a flag the command does not use
     Then each exits with 2 and prints the usage
 
   Scenario: G4 — --fail-on none with a low threshold passes despite regions

@@ -3,7 +3,7 @@
  * Playwright captures, reporters and plugin hooks wired together. The CLI is
  * a thin layer over this; a larger tool can drive it directly.
  */
-import { cp, mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { createCaptureAdapter, type CaptureAdapter, type CaptureOptions, type CaptureTarget } from '../capture/index.ts'
@@ -11,12 +11,13 @@ import type { Engine } from '../core/engine-seam.ts'
 import { ElastishotError } from '../core/errors.ts'
 import type { CompareOptions, RegionKind, Snapshot } from '../core/types.ts'
 import { comparePair, type Plugin, type Reporter, type ReporterOutput } from '../pipeline.ts'
-import { buildReport, isReportJson, type PairReport, type PairStatus, type ReportJson } from '../report/schema.ts'
+import { buildReport, isReportJson, type PairReport, type PairStatus, type PrContext, type ReportJson } from '../report/schema.ts'
 import { writePairArtifacts } from './artifacts.ts'
 import { BASELINE_FILES, CANDIDATE_FILES, isSnapshotDir, readSnapshotDir, writeSnapshotDir } from './baselines.ts'
 import { loadConfig, resolveConfig, resolveTargets, validateConfig, type ElastishotConfig, type ResolvedConfig, type ResolvedTarget, type ViewportConfig } from './config.ts'
 import { resolveInput, type ResolvedSide, type SideInput } from './inputs.ts'
-import { htmlReporter, jsonReporter, junitReporter } from './reporters.ts'
+import { openSides, prTargets, type Cleanup, type OpenedSides } from './pr.ts'
+import { htmlReporter, jsonReporter, junitReporter, markdownReporter } from './reporters.ts'
 import { baselineDirFor, makeRunId, pairId, readLatest, slug, writeLatest } from './runs.ts'
 import { ELASTISHOT_VERSION } from './version.ts'
 
@@ -56,9 +57,15 @@ export interface RunCallOptions {
   targets?: string[]
   /** Write missing baselines instead of reporting them as new. */
   update?: boolean
+  /** With update: also replace baselines this run found different. */
+  force?: boolean
   /** Minimum similarity to pass; overrides the config for this run. */
   threshold?: number
   failOn?: RegionKind[] | 'none'
+  /** Capture options applied to every target, over the config's. */
+  capture?: CaptureOptions
+  /** Resolve relative target URLs against this instead of the config's baseUrl. */
+  baseUrl?: string
   out?: string
   runId?: string
   images?: 'files' | 'inline'
@@ -79,13 +86,51 @@ export interface ApproveCallOptions {
   all?: boolean
 }
 
+export interface PrCallOptions {
+  targets?: string[]
+  /** The commit to compare against; by default chosen as node/git.ts explains. */
+  base?: string
+  /** Keep the base worktree and the temporary folder, and print where they are. */
+  keep?: boolean
+  threshold?: number
+  failOn?: RegionKind[] | 'none'
+  /** Capture options applied to every target on both sides, over the config's. */
+  capture?: CaptureOptions
+  out?: string
+  runId?: string
+  images?: 'files' | 'inline'
+  junit?: boolean | string
+  signal?: AbortSignal
+  /** Progress: the base chosen, install and build output, servers. */
+  log?: (line: string) => void
+  /** Environment for choosing the base (GITHUB_BASE_REF); default process.env. */
+  env?: Record<string, string | undefined>
+  /** Open the two sides another way: a test, or two deployed origins (a preview against production). */
+  openSides?: (cleanup: Cleanup[]) => Promise<OpenedSides>
+}
+
+export interface PrResult extends RunResult {
+  context: PrContext
+}
+
+export interface ApproveResult {
+  approved: string[]
+  candidates: string[]
+  /** The run folder the candidates came from. */
+  runDir: string
+  /** Things worth telling the user: which run was used and why, mismatched baseline folders. */
+  notes: string[]
+}
+
 export interface Elastishot {
   readonly config: ResolvedConfig
   use(plugin: Plugin): Elastishot
   snapshot(target: string | CaptureTarget, options?: SnapshotCallOptions): Promise<{ snapshot: Snapshot; dir: string }>
   compare(baseline: SideInput, candidate: SideInput, options?: CompareCallOptions): Promise<RunResult>
   run(options?: RunCallOptions): Promise<RunResult>
-  approve(options?: ApproveCallOptions): Promise<{ approved: string[]; candidates: string[] }>
+  /** Compare the working tree with a base commit, both served here, with no committed baselines. */
+  pr(options?: PrCallOptions): Promise<PrResult>
+  approve(options?: ApproveCallOptions): Promise<ApproveResult>
   close(): Promise<void>
 }
 
@@ -148,16 +193,19 @@ class ElastishotImpl implements Elastishot {
   }
 
   #captureOptions(viewport?: ViewportConfig, extra?: CaptureOptions): CaptureOptions {
-    return {
+    const options: CaptureOptions = {
       ...this.config.capture,
       ...(viewport ? { viewport: { width: viewport.width, height: viewport.height }, ...(viewport.deviceScaleFactor ? { deviceScaleFactor: viewport.deviceScaleFactor } : {}) } : {}),
       ...extra,
     }
+    // A storage state file named in the config is relative to the config, wherever the command runs.
+    if (typeof options.storageState === 'string') options.storageState = path.resolve(this.config.rootDir, options.storageState)
+    return options
   }
 
-  async #capture(target: CaptureTarget, captureOptions: CaptureOptions): Promise<Snapshot> {
+  async #capture(target: CaptureTarget, captureOptions: CaptureOptions, side?: 'base' | 'head'): Promise<Snapshot> {
     const snapshot = await this.#adapterOrCreate().capture(target, captureOptions)
-    for (const p of this.#plugins) await p.onCaptured?.({ target, snapshot })
+    for (const p of this.#plugins) await p.onCaptured?.({ target, snapshot, ...(side ? { side } : {}) })
     return snapshot
   }
 
@@ -187,40 +235,123 @@ class ElastishotImpl implements Elastishot {
       baseline,
       candidate,
       { ...this.config.compare, ...o.compare },
-      { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn },
+      { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn, ignore: this.config.ignore },
       started,
       o.images ?? this.config.report.images,
     )
-    return this.#finish([pair], runDir, runId, o.junit, false, o.failOn)
+    return this.#finish([pair], runDir, runId, { command: 'compare', ...(o.junit !== undefined ? { junit: o.junit } : {}), ...(o.failOn !== undefined ? { failOn: o.failOn } : {}) })
   }
 
   async run(o: RunCallOptions = {}): Promise<RunResult> {
-    const targets = resolveTargets(this.config, o.targets ?? [])
+    const targets = resolveTargets(this.config, o.targets ?? [], o.baseUrl ? { baseUrl: o.baseUrl } : {})
     if (!targets.length) throw new ElastishotError('E_USAGE', this.config.configPath ? `no targets in ${this.config.configPath}` : 'no config file found; create elastishot.config.js with targets')
     const runId = o.runId ?? makeRunId()
     const runDir = path.resolve(this.config.rootDir, o.out ?? path.join(this.config.outDir, runId))
     const pairs: PairReport[] = []
     for (const t of targets) pairs.push(await this.#runTarget(runDir, t, o))
-    return this.#finish(pairs, runDir, runId, o.junit, o.update ?? false, o.failOn)
+    return this.#finish(pairs, runDir, runId, {
+      command: 'run',
+      update: o.update ?? false,
+      force: o.force ?? false,
+      ...(o.junit !== undefined ? { junit: o.junit } : {}),
+      ...(o.failOn !== undefined ? { failOn: o.failOn } : {}),
+    })
   }
 
-  async #runTarget(runDir: string, t: ResolvedTarget, o: RunCallOptions): Promise<PairReport> {
+  async pr(o: PrCallOptions = {}): Promise<PrResult> {
+    const log = o.log ?? (() => undefined)
+    if (!this.config.targets.length) throw new ElastishotError('E_USAGE', this.config.configPath ? `no targets in ${this.config.configPath}` : 'no config file found; create elastishot.config.js with targets')
+    // URL and target-name mistakes fail before any git, install or build work.
+    prTargets(this.config, o.targets ?? [], 'http://127.0.0.1')
+    const runId = o.runId ?? makeRunId()
+    const runDir = path.resolve(this.config.rootDir, o.out ?? path.join(this.config.outDir, runId))
+    const cleanup: Cleanup[] = []
+    try {
+      const sides = o.openSides
+        ? await o.openSides(cleanup)
+        : await openSides({
+            configRoot: this.config.rootDir,
+            pr: this.config.pr,
+            ...(o.base ? { base: o.base } : {}),
+            ...(o.keep ? { keep: true } : {}),
+            env: o.env ?? process.env,
+            log,
+            ...(o.signal ? { signal: o.signal } : {}),
+            cleanup,
+          })
+      const pr: PrSide = {
+        baselineDir: path.join(sides.tmp, 'baselines'),
+        absent: new Map(),
+        baseLabel: `${sides.base.ref}@${sides.base.sha.slice(0, 7)}`,
+        headLabel: sides.head.dirty ? 'working tree' : `HEAD@${sides.head.sha.slice(0, 7)}`,
+      }
+      // The base pass only captures: its snapshots are this run's baselines.
+      const baseTargets = prTargets(this.config, o.targets ?? [], sides.base.origin)
+      for (const t of baseTargets) {
+        checkAbort(o.signal)
+        try {
+          const snapshot = await this.#capture({ url: t.url, name: t.name }, this.#captureOptions(t.viewport, { ...t.capture, ...o.capture }), 'base')
+          // A page the branch adds answers 404 on the base: new on the head side, not an error.
+          if ((snapshot.meta.httpStatus ?? 200) >= 400) {
+            pr.absent.set(t.key, `HTTP ${snapshot.meta.httpStatus}`)
+            continue
+          }
+          snapshot.meta.viewportName = t.viewport.name
+          snapshot.meta.target = t.name
+          await writeSnapshotDir(baselineDirFor(pr.baselineDir, t.name, t.viewport.name), snapshot)
+        } catch (error) {
+          pr.absent.set(t.key, (error as Error).message.split('\n')[0]!)
+        }
+      }
+      if (pr.absent.size === baseTargets.length) {
+        const [reason] = pr.absent.values()
+        throw new ElastishotError('E_CAPTURE', `nothing could be captured on ${pr.baseLabel}: ${reason}`)
+      }
+      await sides.stopBase()
+      const pairs: PairReport[] = []
+      for (const t of prTargets(this.config, o.targets ?? [], sides.head.origin)) {
+        checkAbort(o.signal)
+        pairs.push(await this.#runTarget(runDir, t, o, pr))
+      }
+      const context: PrContext = { kind: 'pr', base: { ref: sides.base.ref, sha: sides.base.sha, rule: sides.base.rule }, head: { sha: sides.head.sha, dirty: sides.head.dirty } }
+      const result = await this.#finish(pairs, runDir, runId, {
+        command: 'pr',
+        context,
+        ...(o.junit !== undefined ? { junit: o.junit } : {}),
+        ...(o.failOn !== undefined ? { failOn: o.failOn } : {}),
+      })
+      return { ...result, context }
+    } finally {
+      for (const undo of cleanup.reverse()) await undo().catch((e: Error) => log(`elastishot: cleanup: ${e.message}`))
+    }
+  }
+
+  async #runTarget(runDir: string, t: ResolvedTarget, o: Pick<RunCallOptions, 'update' | 'force' | 'threshold' | 'failOn' | 'capture' | 'images'>, pr?: PrSide): Promise<PairReport> {
     const started = performance.now()
-    const dir = baselineDirFor(this.config.baselineDir, t.name, t.viewport.name)
+    const dir = baselineDirFor(pr?.baselineDir ?? this.config.baselineDir, t.name, t.viewport.name)
     const id = pairId(t.name, t.viewport.name)
     const meta = { id, name: t.name, target: t.name, viewport: t.viewport }
-    const captureOptions = this.#captureOptions(t.viewport, t.capture)
+    const captureOptions = this.#captureOptions(t.viewport, { ...t.capture, ...o.capture })
+    // In a pr run both sides share the path; the ports are throwaway.
+    const where = pr ? `${new URL(t.url).pathname}${new URL(t.url).search}` : t.url
     let candidate: ResolvedSide
     try {
-      const snapshot = await this.#capture({ url: t.url, name: t.name }, captureOptions)
+      const snapshot = await this.#capture({ url: t.url, name: t.name }, captureOptions, pr ? 'head' : undefined)
       snapshot.meta.viewportName = t.viewport.name
       snapshot.meta.target = t.name
       candidate = await resolveInput(snapshot)
-      candidate = { ...candidate, source: t.url }
+      candidate = { ...candidate, source: pr ? `${pr.headLabel} ${where}` : t.url }
     } catch (error) {
       const message = (error as Error).message
       const baselineSide = (await isSnapshotDir(dir)) ? await resolveInput(dir) : null
       return this.#errorPair(runDir, meta, baselineSide, null, message, started, t.url)
+    }
+    if (pr && !(await isSnapshotDir(dir))) {
+      return writePairArtifacts(
+        runDir,
+        { ...meta, baseline: { ...candidate, source: `not on ${pr.baseLabel}` }, candidate, result: null, locators: null, status: 'new', failReasons: [`not on ${pr.baseLabel}: ${pr.absent.get(t.key) ?? 'no capture'}`], durationMs: performance.now() - started },
+        { images: o.images ?? this.config.report.images },
+      )
     }
     if (!(await isSnapshotDir(dir))) {
       if (o.update) await writeSnapshotDir(dir, candidate.snapshot!)
@@ -230,8 +361,23 @@ class ElastishotImpl implements Elastishot {
         { images: o.images ?? this.config.report.images },
       )
     }
-    const baseline = await resolveInput(dir)
-    return this.#comparePair(runDir, meta, baseline, candidate, t.compare, { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn }, started, o.images ?? this.config.report.images)
+    const baseline = pr ? { ...(await resolveInput(dir)), source: `${pr.baseLabel} ${where}` } : await resolveInput(dir)
+    // --update --force accepts this capture as the new baseline when it differs.
+    const replace = o.update && o.force && candidate.snapshot
+      ? async (status: PairStatus): Promise<string[]> => {
+          if (status !== 'failed') return []
+          await this.#promote(candidate.snapshot!, dir, runDir, t.name, t.viewport.name)
+          return ['baseline replaced by this capture (--update --force)']
+        }
+      : undefined
+    return this.#comparePair(runDir, meta, baseline, candidate, t.compare, { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn, ignore: t.ignore }, started, o.images ?? this.config.report.images, replace)
+  }
+
+  /** Make a captured snapshot the baseline of a target and viewport, recording where it was approved from. */
+  async #promote(snapshot: Snapshot, to: string, runDir: string, target: string, viewportName: string): Promise<void> {
+    const meta = { ...snapshot.meta, approvedAt: new Date().toISOString(), approvedFrom: runDir, target, viewportName }
+    await mkdir(to, { recursive: true })
+    await writeSnapshotDir(to, { ...snapshot, meta }, BASELINE_FILES)
   }
 
   async #errorPair(runDir: string, meta: { id: string; name: string; target?: string; viewport?: ViewportConfig }, baseline: ResolvedSide | null, candidate: ResolvedSide | null, message: string, started: number, source: string): Promise<PairReport> {
@@ -253,9 +399,11 @@ class ElastishotImpl implements Elastishot {
     baseline: ResolvedSide,
     candidate: ResolvedSide,
     compareOptions: CompareOptions,
-    thresholds: { threshold: number; failOn: RegionKind[] | 'none' },
+    rules: { threshold: number; failOn: RegionKind[] | 'none'; ignore?: string[] },
     started: number,
     images: 'files' | 'inline',
+    /** Runs once the verdict is known, before the pair is written; its lines join failReasons. */
+    afterVerdict?: (status: PairStatus) => Promise<string[]>,
   ): Promise<PairReport> {
     let status: PairStatus
     let outcome: Awaited<ReturnType<typeof comparePair>> | null = null
@@ -265,15 +413,17 @@ class ElastishotImpl implements Elastishot {
         ...(this.#engine ? { engine: this.#engine } : {}),
         compare: { ...compareOptions, artifacts: { diffMask: true, overlay: true, warpedCandidate: true, candidateOverlay: false, ...compareOptions.artifacts } },
         locators: this.config.locators,
-        threshold: thresholds.threshold,
-        failOn: thresholds.failOn,
+        threshold: rules.threshold,
+        failOn: rules.failOn,
         minRegionScore: this.config.minRegionScore,
+        ...(rules.ignore?.length ? { ignore: rules.ignore } : {}),
       })
       status = outcome.pass ? 'passed' : 'failed'
     } catch (e) {
       status = 'error'
       error = (e as Error).message
     }
+    const extraReasons = afterVerdict && status !== 'error' ? await afterVerdict(status) : []
     const pair = await writePairArtifacts(
       runDir,
       {
@@ -282,8 +432,9 @@ class ElastishotImpl implements Elastishot {
         candidate,
         result: outcome?.result ?? null,
         locators: outcome?.locators ?? null,
+        ...(outcome?.ignored.length ? { ignored: outcome.ignored } : {}),
         status,
-        failReasons: outcome?.failReasons ?? [],
+        failReasons: [...(outcome?.failReasons ?? []), ...extraReasons],
         ...(error ? { error } : {}),
         durationMs: performance.now() - started,
       },
@@ -293,35 +444,56 @@ class ElastishotImpl implements Elastishot {
     return pair
   }
 
-  async #finish(pairs: PairReport[], runDir: string, runId: string, junit: boolean | string | undefined, update: boolean, failOn?: RegionKind[] | 'none'): Promise<RunResult> {
+  async #finish(pairs: PairReport[], runDir: string, runId: string, o: FinishOptions): Promise<RunResult> {
     const report = buildReport(pairs, {
       runId,
       elastishotVersion: ELASTISHOT_VERSION,
-      config: { threshold: this.config.threshold, failOn: failOn ?? this.config.failOn },
+      // The baseline folder matters to approve, which only ever promotes from run.
+      config: { threshold: this.config.threshold, failOn: o.failOn ?? this.config.failOn, command: o.command, ...(o.command === 'run' ? { baselineDir: this.config.baselineDir } : {}) },
+      ...(o.context ? { context: o.context } : {}),
     })
     await mkdir(runDir, { recursive: true })
     const reporters: Reporter[] = [jsonReporter(), htmlReporter({ title: this.config.report.title })]
-    const wantJunit = junit ?? this.config.report.junit
+    const wantJunit = o.junit ?? this.config.report.junit
     if (wantJunit) reporters.push(junitReporter(typeof wantJunit === 'string' ? wantJunit : 'junit.xml'))
+    if (o.command === 'pr' || this.config.report.markdown) reporters.push(markdownReporter({ title: this.config.report.title }))
     reporters.push(...this.#reporters)
     const outputs: ReporterOutput[] = []
     for (const r of reporters) outputs.push(...((await r.report(report, { runDir })) ?? []))
+    // `latest` follows the newest run of any kind so its report is one path
+    // away; approve checks which command made it before promoting from it.
     await writeLatest(this.config.outDir, runDir)
     for (const p of this.#plugins) await p.onReported?.({ report, outputs })
-    const exitCode: 0 | 1 | 2 = report.totals.errors ? 2 : report.totals.failed || (report.totals.new && !update) ? 1 : 0
+    const update = o.update ?? false
+    // Failed pairs of a run --update --force had their baselines replaced on purpose.
+    const failed = report.totals.failed && !(update && o.force)
+    const exitCode: 0 | 1 | 2 = report.totals.errors ? 2 : failed || (report.totals.new && !update) ? 1 : 0
     return { report, runDir, outputs, exitCode }
   }
 
-  async approve(o: ApproveCallOptions = {}): Promise<{ approved: string[]; candidates: string[] }> {
-    const runDir = o.runDir ? path.resolve(this.config.rootDir, o.runDir) : await readLatest(this.config.outDir)
-    if (!runDir) throw new ElastishotError('E_USAGE', 'no run to approve from; run a comparison first or pass a run folder')
-    let report: unknown
-    try {
-      report = JSON.parse(await readFile(path.join(runDir, 'report.json'), 'utf8'))
-    } catch (cause) {
-      throw new ElastishotError('E_INPUT_NOT_FOUND', `no report.json in ${runDir}`, { cause })
+  async approve(o: ApproveCallOptions = {}): Promise<ApproveResult> {
+    const notes: string[] = []
+    let runDir: string
+    let report: ReportJson
+    if (o.runDir) {
+      runDir = path.resolve(this.config.rootDir, o.runDir)
+      report = await readRunReport(runDir)
+      if (report.config.command && report.config.command !== 'run') throw new ElastishotError('E_USAGE', `${runDir} was made by ${report.config.command}; only pairs made by run can be approved`)
+    } else {
+      let found: { runDir: string; report: ReportJson }
+      try {
+        found = await this.#latestApprovableRun(notes)
+      } catch (error) {
+        // Without a target or --all the usage is the first thing to fix.
+        if (!o.target && !o.all) throw new ElastishotError('E_USAGE', `approve needs a target or --all; ${(error as Error).message}`)
+        throw error
+      }
+      runDir = found.runDir
+      report = found.report
     }
-    if (!isReportJson(report)) throw new ElastishotError('E_DECODE', `${runDir}/report.json is not an elastishot report`)
+    if (report.config.baselineDir && path.resolve(report.config.baselineDir) !== this.config.baselineDir) {
+      notes.push(`that run compared against baselines in ${report.config.baselineDir}; approving into ${this.config.baselineDir}`)
+    }
     const promotable = report.pairs.filter((p) => p.target && p.viewport?.name && p.status !== 'error')
     const candidates = promotable.map((p) => `${p.target}/${p.viewport!.name}`)
     let chosen: PairReport[]
@@ -340,13 +512,71 @@ class ElastishotImpl implements Elastishot {
       const from = path.join(runDir, 'pairs', p.id)
       if (!(await isSnapshotDir(from, CANDIDATE_FILES))) throw new ElastishotError('E_INPUT_NOT_FOUND', `${from} has no candidate.png to promote`)
       const snapshot = await readSnapshotDir(from, CANDIDATE_FILES)
-      snapshot.meta = { ...snapshot.meta, approvedAt: new Date().toISOString(), approvedFrom: runDir, target, viewportName }
-      const to = baselineDirFor(this.config.baselineDir, target, viewportName)
-      await mkdir(to, { recursive: true })
-      await writeSnapshotDir(to, snapshot, BASELINE_FILES)
-      await cp(path.join(from, CANDIDATE_FILES.image), path.join(to, BASELINE_FILES.image))
+      await this.#promote(snapshot, baselineDirFor(this.config.baselineDir, target, viewportName), runDir, target, viewportName)
       approved.push(`${target}/${viewportName}`)
     }
-    return { approved, candidates }
+    return { approved, candidates, runDir, notes }
   }
+
+  /**
+   * The run approve works from by default: `latest`, unless another command
+   * made it (an ad-hoc compare between run and approve, say); then the newest
+   * run folder in outDir that `run` made, with a note saying so.
+   */
+  async #latestApprovableRun(notes: string[]): Promise<{ runDir: string; report: ReportJson }> {
+    const latest = await readLatest(this.config.outDir)
+    if (!latest) throw new ElastishotError('E_USAGE', 'no run to approve from; run a comparison first or pass a run folder')
+    const report = await readRunReport(latest)
+    if (!report.config.command || report.config.command === 'run') return { runDir: latest, report }
+    let names: string[] = []
+    try {
+      names = (await readdir(this.config.outDir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name)
+    } catch {
+      /* no outDir: nothing older to fall back to */
+    }
+    // Run ids are UTC timestamps, so the names sort in time order.
+    for (const name of names.sort().reverse()) {
+      const runDir = path.join(this.config.outDir, name)
+      if (path.resolve(runDir) === path.resolve(latest)) continue
+      const candidate = await readRunReport(runDir).catch(() => null)
+      if (candidate?.config.command === 'run') {
+        notes.push(`the latest run (${path.basename(latest)}) was made by ${report.config.command}; approving from ${name}, the latest run made by run`)
+        return { runDir, report: candidate }
+      }
+    }
+    throw new ElastishotError('E_USAGE', `the latest run (${latest}) was made by ${report.config.command}, and no run made by run is left in ${this.config.outDir}; pass the run folder to approve`)
+  }
+}
+
+interface FinishOptions {
+  command: 'compare' | 'run' | 'pr'
+  junit?: boolean | string
+  update?: boolean
+  force?: boolean
+  failOn?: RegionKind[] | 'none'
+  context?: PrContext
+}
+
+/** What #runTarget needs to know in a pr run: where the base captures went and how to label the sides. */
+interface PrSide {
+  baselineDir: string
+  /** Targets the base could not capture, by key, with the reason. */
+  absent: Map<string, string>
+  baseLabel: string
+  headLabel: string
+}
+
+function checkAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new ElastishotError('E_ABORTED', 'interrupted')
+}
+
+async function readRunReport(runDir: string): Promise<ReportJson> {
+  let report: unknown
+  try {
+    report = JSON.parse(await readFile(path.join(runDir, 'report.json'), 'utf8'))
+  } catch (cause) {
+    throw new ElastishotError('E_INPUT_NOT_FOUND', `no report.json in ${runDir}`, { cause })
+  }
+  if (!isReportJson(report)) throw new ElastishotError('E_DECODE', `${runDir}/report.json is not an elastishot report`)
+  return report
 }

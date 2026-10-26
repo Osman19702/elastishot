@@ -14,7 +14,7 @@ The package is split so a host application takes only what it needs.
 
 ## The engine in a browser
 
-opencv.js is 12 MB and is never bundled. Load it yourself, lazily, and hand it to the engine:
+opencv.js is 13 MB and is never bundled. Load it yourself, lazily, and hand it to the engine:
 
 ```js
 import { createEngine } from 'elastishot/engine'

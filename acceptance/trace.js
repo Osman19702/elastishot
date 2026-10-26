@@ -28,7 +28,7 @@ export function readTests() {
   for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.acceptance.test.js'))) {
     const src = fs.readFileSync(path.join(dir, file), 'utf8')
     const consts = Object.fromEntries([...src.matchAll(/const\s+([A-Z_]+)\s*=\s*(['"`])(.*?)\2/g)].map((m) => [m[1], m[3]]))
-    for (const m of src.matchAll(/test\(\s*(['"`])([A-G]\d+) — .*?\1\s*(?:,\s*\{\s*todo:\s*(?:(['"`])(.*?)\3|([A-Z_]+))\s*\})?/gs)) {
+    for (const m of src.matchAll(/test\(\s*(['"`])([A-H]\d+) — .*?\1\s*(?:,\s*\{\s*todo:\s*(?:(['"`])(.*?)\3|([A-Z_]+))\s*\})?/gs)) {
       const todo = m[4] ?? (m[5] ? consts[m[5]] || m[5] : null)
       tests.set(m[2], { file, todo })
     }

@@ -4,11 +4,13 @@
  * JSON object and nothing else.
  */
 import { ElastishotError } from '../core/errors.ts'
+import { topLocators } from '../report/markdown.ts'
 import type { PairReport, ReportJson } from '../report/schema.ts'
 import { ELASTISHOT_VERSION } from '../node/version.ts'
 import { parseCliArgs, USAGE, UsageError, type ParsedArgs } from './args.ts'
 import { approveCommand } from './commands/approve.ts'
 import { compareCommand } from './commands/compare.ts'
+import { prCommand } from './commands/pr.ts'
 import { reportCommand } from './commands/report.ts'
 import { runCommand } from './commands/run.ts'
 import { snapshotCommand } from './commands/snapshot.ts'
@@ -33,7 +35,7 @@ export function pairLine(p: PairReport): string {
   const vp = p.viewport ? ` [${p.viewport.name ?? `${p.viewport.width}x${p.viewport.height}`}]` : ''
   const score = p.summary ? `  score ${(p.summary.similarity * 100).toFixed(1)}%` : ''
   const counts = p.summary ? `  ${(Object.keys(KIND_SIGN) as Array<keyof typeof KIND_SIGN>).map((k) => `${KIND_SIGN[k]}${p.summary!.counts[k]}`).join(' ')}` : ''
-  const top = p.locators?.changedLocators.filter((l) => l.evidence.includes('pixels')).slice(0, 3).map((l) => l.locator) ?? []
+  const top = topLocators(p)
   const locators = top.length ? `  -> ${top.join(', ')}` : ''
   const error = p.error ? `  ${p.error}` : ''
   return `${status} ${p.name}${vp}${score}${counts}${locators}${error}`
@@ -75,6 +77,8 @@ export async function main(argv: string[], io: CliIo = defaultIo): Promise<numbe
         return await snapshotCommand(args, io)
       case 'run':
         return await runCommand(args, io)
+      case 'pr':
+        return await prCommand(args, io)
       case 'approve':
         return await approveCommand(args, io)
       case 'report':

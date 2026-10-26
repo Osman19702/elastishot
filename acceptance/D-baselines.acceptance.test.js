@@ -8,7 +8,7 @@ import { access, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
 
-import { elastishot, workspace } from './support/cli.js'
+import { elastishot, image, workspace } from './support/cli.js'
 import { startSite } from './support/site.js'
 
 let ws
@@ -65,4 +65,39 @@ test('D3 — A changed deployment fails, approve promotes it, the next run passe
   const passing = await cli(['run'])
   assert.equal(passing.code, 0, passing.stderr)
   assert.match(passing.lines[0], /^PASS home \[desktop\]/)
+})
+
+test('D4 — A run with --single-file can still be approved', async () => {
+  await config(1) // D3 left the baseline at version 2
+  const single = await cli(['run', '--single-file'])
+  assert.equal(single.code, 1, single.stderr)
+  const approve = await cli(['approve', 'home'])
+  assert.equal(approve.code, 0, approve.stderr)
+  assert.match(approve.stdout, /approved home\/desktop/)
+  const next = await cli(['run'])
+  assert.equal(next.code, 0, next.stderr)
+})
+
+test('D5 — An ad-hoc compare between run and approve does not lose the run', async () => {
+  await config(2) // the baseline is version 1 since D4
+  const failing = await cli(['run'])
+  assert.equal(failing.code, 1, failing.stderr)
+  const adhoc = await cli(['compare', image('base.png'), image('base.png'), '--quiet'])
+  assert.equal(adhoc.code, 0, adhoc.stderr)
+  const approve = await cli(['approve', 'home'])
+  assert.equal(approve.code, 0, approve.stderr)
+  assert.match(approve.stdout, /approved home\/desktop/)
+  assert.match(approve.stderr, /note: the latest run .* was made by compare; approving from /)
+  const next = await cli(['run'])
+  assert.equal(next.code, 0, next.stderr)
+})
+
+test('D6 — run --update --force replaces a baseline that drifted', async () => {
+  await config(1) // the baseline is version 2 since D5
+  const forced = await cli(['run', '--update', '--force', '--json'])
+  assert.equal(forced.code, 0, forced.stderr)
+  const pair = JSON.parse(forced.stdout).pairs[0]
+  assert.ok(pair.failReasons.some((r) => /baseline replaced/.test(r)), pair.failReasons.join('; '))
+  const next = await cli(['run'])
+  assert.equal(next.code, 0, next.stderr)
 })

@@ -11,6 +11,11 @@ updates:
       dependencies:
         patterns: ['*']
         update-types: ['minor', 'patch']
+    # @types/node follows the oldest Node the package supports, not the newest
+    # release: newer types would let code use APIs that Node 20 and 22 lack.
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:

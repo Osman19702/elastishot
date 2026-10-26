@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Layers</title>
+<style>
+  /* An app shell like React Native for Web's: the body never scrolls, the app does. */
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 16px/1.4 sans-serif; }
+  .app { height: 100%; overflow: auto; }
+  .stack { position: relative; height: 200px; }
+  .scene { position: absolute; inset: 0; padding: 20px; background: #fff; }
+  .scene.active { z-index: 2; }
+  .scene.inactive { z-index: 1; }
+  .row { height: 120px; box-sizing: border-box; border-bottom: 1px solid #ccc; padding: 12px; }
+</style>
+</head>
+<body>
+<div class="app" data-testid="app">
+  <div class="stack">
+    <section class="scene active" data-testid="scene-active">
+      <h1>Active tab</h1>
+      <button data-testid="save"><span aria-hidden="true" data-testid="icon">&#9733;</span> Save</button>
+    </section>
+    <section class="scene inactive" aria-hidden="true" data-testid="scene-inactive">
+      <h1>Inactive tab</h1>
+      <p data-testid="inactive-text">Mounted behind the active tab</p>
+    </section>
+  </div>
+  <div class="row" data-testid="row-1">Row 1</div>
+  <div class="row" data-testid="row-2">Row 2</div>
+  <div class="row" data-testid="row-3">Row 3</div>
+  <div class="row" data-testid="row-4">Row 4</div>
+  <div class="row" data-testid="row-5">Row 5</div>
+  <div class="row" data-testid="row-6">Row 6</div>
+  <div class="row" data-testid="row-7">Row 7</div>
+  <div class="row" data-testid="row-8">Row 8</div>
+  <div class="row" data-testid="row-9">Row 9</div>
+  <div class="row" data-testid="row-10">Row 10</div>
+  <div class="row" data-testid="row-11">Row 11</div>
+  <div class="row" data-testid="row-12">Row 12</div>
+  <div class="row" data-testid="row-13">Row 13</div>
+  <div class="row" data-testid="row-14">Row 14</div>
+  <div class="row" data-testid="row-15">Row 15</div>
+  <div class="row" data-testid="row-16">Row 16</div>
+  <div class="row" data-testid="row-17">Row 17</div>
+  <div class="row" data-testid="row-18">Row 18</div>
+  <div class="row" data-testid="row-19">Row 19</div>
+  <div class="row" data-testid="row-20">Row 20</div>
+</div>
+</body>
+</html>

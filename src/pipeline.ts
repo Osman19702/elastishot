@@ -7,7 +7,7 @@ import { loadEngine, type Engine } from './core/engine-seam.ts'
 import { checkSnapshot } from './core/snapshot-check.ts'
 import { evaluate } from './core/thresholds.ts'
 import type { CompareOptions, CompareResult, ElementMap, RasterImage, RegionKind, Snapshot, SnapshotMeta } from './core/types.ts'
-import { mapLocators, type LocatorOptions, type LocatorReport } from './locators/index.ts'
+import { mapLocators, resolveIgnore, type IgnoredElement, type LocatorOptions, type LocatorReport } from './locators/index.ts'
 import type { PairReport, ReportJson } from './report/schema.ts'
 
 export interface PairSide {
@@ -23,6 +23,8 @@ export interface PairOutcome {
   locators: LocatorReport
   pass: boolean
   failReasons: string[]
+  /** Elements left out through `ignore`, per side. */
+  ignored: IgnoredElement[]
 }
 
 export interface ComparePairOptions {
@@ -33,6 +35,8 @@ export interface ComparePairOptions {
   threshold?: number
   failOn?: RegionKind[] | 'none'
   minRegionScore?: number
+  /** Locators whose boxes in each side's element map are left out of the comparison. */
+  ignore?: string[]
 }
 
 /** Compare two sides, name the regions and decide pass/fail. */
@@ -42,9 +46,28 @@ export async function comparePair(baseline: PairSide, candidate: PairSide, optio
   if (options.threshold !== undefined) thresholds.similarity = options.threshold
   if (options.failOn !== undefined) thresholds.failOn = options.failOn === 'none' ? [] : options.failOn
   if (options.minRegionScore !== undefined) thresholds.minRegionScore = options.minRegionScore
-  const result = await engine.compare(baseline.image, candidate.image, { ...options.compare, thresholds })
+  let compare: CompareOptions = { ...options.compare, thresholds }
+  const ignore = options.ignore?.length ? resolveIgnore(options.ignore, { baseline: baseline.elementMap ?? null, candidate: candidate.elementMap ?? null }) : null
+  if (ignore) {
+    compare = {
+      ...compare,
+      ignoreRegions: [...(compare.ignoreRegions ?? []), ...ignore.baseline],
+      ignoreRegionsCandidate: [...(compare.ignoreRegionsCandidate ?? []), ...ignore.candidate],
+    }
+  }
+  const result = await engine.compare(baseline.image, candidate.image, compare)
   // A captured error page compares like any other page; say so before anyone trusts the score.
   result.summary.warnings.push(...checkSnapshot('baseline', baseline), ...checkSnapshot('candidate', candidate))
+  if (ignore?.unresolved.length) {
+    const noMaps = !baseline.elementMap && !candidate.elementMap
+    result.summary.warnings.push({
+      code: 'IGNORE_UNRESOLVED',
+      message: noMaps
+        ? `ignore: neither side has an element map, so ${ignore.unresolved.join(', ')} could not be found`
+        : `ignore: nothing in either element map matches ${ignore.unresolved.join(', ')}; use a test id, an id or a role locator the map records, or capture.mask for other CSS selectors`,
+      data: { unresolved: ignore.unresolved },
+    })
+  }
   const locators = mapLocators(
     result.regions,
     { baseline: baseline.elementMap ?? null, candidate: candidate.elementMap ?? null },
@@ -55,7 +78,7 @@ export async function comparePair(baseline: PairSide, candidate: PairSide, optio
     ...(thresholds.failOn !== undefined ? { failOn: thresholds.failOn } : {}),
     ...(thresholds.minRegionScore !== undefined ? { minRegionScore: thresholds.minRegionScore } : {}),
   })
-  return { result, locators, pass: verdict.pass, failReasons: verdict.reasons }
+  return { result, locators, pass: verdict.pass, failReasons: verdict.reasons, ignored: ignore?.ignored ?? [] }
 }
 
 // ------------------------------------------------------------ extensibility
@@ -82,6 +105,8 @@ export interface Reporter {
 export interface CapturedHook {
   target: { url: string; name?: string }
   snapshot: Snapshot
+  /** In a pr run: which side was captured. */
+  side?: 'base' | 'head'
 }
 
 export interface ComparedHook {

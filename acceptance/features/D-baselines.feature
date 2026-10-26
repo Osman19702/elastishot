@@ -24,3 +24,23 @@ Feature: D — Tracking a URL across deployments
     When I approve the target
     Then the baseline meta records the approval
     And running again exits with 0
+
+  Scenario: D4 — A run with --single-file can still be approved
+    Given the baseline was taken from version 2
+    When the target points at version 1 and I run with --single-file
+    Then the command exits with 1
+    When I approve the target
+    Then the next run exits with 0
+
+  Scenario: D5 — An ad-hoc compare between run and approve does not lose the run
+    Given a run against version 2 failed
+    When I compare two images before approving
+    And I approve the target
+    Then the candidate of that run is promoted and a note names the run used
+    And the next run exits with 0
+
+  Scenario: D6 — run --update --force replaces a baseline that drifted
+    Given the baseline was taken from version 2
+    When the target points at version 1 and I run with --update --force
+    Then the command exits with 0 and the pair says its baseline was replaced
+    And the next run exits with 0

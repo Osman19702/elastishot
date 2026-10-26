@@ -1,9 +1,36 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import type { Reporter } from '../pipeline.ts'
+import type { Reporter, ReporterOutput } from '../pipeline.ts'
 import { renderJUnit } from '../report/junit.ts'
+import { renderMarkdownSummary, type MarkdownOptions } from '../report/markdown.ts'
 import { renderSummaryReport } from '../report/summary.ts'
+
+/**
+ * summary.md in the run folder, and the same table appended to the GitHub job
+ * summary when the run is a GitHub Actions step ($GITHUB_STEP_SUMMARY).
+ */
+export function markdownReporter(options: MarkdownOptions = {}): Reporter {
+  return {
+    name: 'markdown',
+    async report(report, ctx) {
+      const markdown = renderMarkdownSummary(report, options)
+      const outputs: ReporterOutput[] = []
+      if (ctx.runDir) {
+        await mkdir(ctx.runDir, { recursive: true })
+        const file = path.join(ctx.runDir, 'summary.md')
+        await writeFile(file, markdown)
+        outputs.push({ name: 'markdown', path: file })
+      }
+      const summary = process.env.GITHUB_STEP_SUMMARY
+      if (summary) {
+        await appendFile(summary, `${markdown}\n`)
+        outputs.push({ name: 'github-step-summary', path: summary })
+      }
+      return outputs
+    },
+  }
+}
 
 /** report.json in the run folder. */
 export function jsonReporter(): Reporter {
