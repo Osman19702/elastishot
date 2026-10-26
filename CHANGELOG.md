@@ -6,6 +6,43 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`run` no longer ignores capture flags.** `--full-page`, `--wait-for`,
+  `--hide` and `--no-map` now apply to every target, over the config.
+- **A flag a command does not use is now a usage error** (exit 2) instead of
+  being parsed and dropped. Examples: `run --viewport`, `run --name`, and
+  `--all` anywhere but `approve`. Scripts that passed such flags got nothing
+  from them before; now they are told.
+- **A run made with `--single-file` can be approved.** Candidate files are
+  written for every pair `approve` accepts; the pages still inline every
+  image.
+- **An ad-hoc `compare` no longer breaks a pending `approve`.**
+  - `report.json` now records the command that made the run and the baseline
+    folder it used (`config.command`, `config.baselineDir`).
+  - `approve` without a run folder skips a `latest` that `compare` made, uses
+    the newest run that `run` made, and says so.
+  - It also notes when the run compared against a different baseline folder.
+  - `latest` still points at the newest run of any kind.
+- **`approve <name>` treats a folder as a run only when it holds a
+  `report.json`,** so a target named like a folder in the project is no longer
+  misread.
+- **A delay can carry a unit.** `--wait-for 2000ms` and `waitFor: '2000ms'`
+  are delays; before, they were taken as CSS selectors and timed out.
+
+### Added
+
+- **`run --update --force`** also replaces baselines that differ from the new
+  capture. Those pairs keep their diff and a "baseline replaced" reason, and
+  the run exits 0.
+- **`compare --no-config`** ignores any config file, so an ad-hoc comparison
+  inside a project neither takes its thresholds nor runs its reporters.
+- **`--viewport` accepts a configured viewport's name.** A `snapshot
+  --viewport 390x844@2` that matches a configured viewport also takes its name,
+  so the baseline lands in the folder `run` reads.
+- **Config discovery:** the config file is found in the current folder or the
+  nearest parent folder, and `elastishot.config.cjs` is recognised.
+
 ### Changed
 
 - **opencv.js 5.0** (`@techstark/opencv-js` 5.0.0-release.1, up from 4.12). The

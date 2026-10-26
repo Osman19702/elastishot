@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
@@ -101,6 +101,25 @@ test('--fail-on none and a low threshold let differences pass; --single-file inl
   assert.match(html, /baseline-src="data:image\/png;base64,/)
   const junit = await readFile(path.join(out, 'junit.xml'), 'utf8')
   assert.match(junit, /<testcase classname="elastishot" name="recolored" time="[\d.]+"\/>/)
+})
+
+test('compare --no-config ignores the config of the folder it runs in', async () => {
+  const dir = path.join(tmp, 'lenient-project')
+  await mkdir(dir, { recursive: true })
+  await writeFile(path.join(dir, 'elastishot.config.json'), JSON.stringify({ threshold: 0.1, failOn: 'none' }))
+  const args = ['compare', path.join(fixtures, 'base.png'), path.join(fixtures, 'collapsed.png'), '--quiet']
+  const lenient = io(dir)
+  assert.equal(await main([...args, '--out', path.join(tmp, 'run-config')], lenient), 0, lenient.err.join('\n'))
+  const defaults = io(dir)
+  assert.equal(await main([...args, '--out', path.join(tmp, 'run-no-config'), '--no-config'], defaults), 1, defaults.err.join('\n'))
+})
+
+test('approve reads its argument as a run folder only when it holds a report.json', async () => {
+  const dir = path.join(tmp, 'approve-names')
+  await mkdir(path.join(dir, 'home'), { recursive: true })
+  const a = io(dir)
+  assert.equal(await main(['approve', 'home'], a), 2)
+  assert.match(a.err[0]!, /no run to approve from/)
 })
 
 test('approve without a target or --all explains what it needs; report re-renders a run', async () => {

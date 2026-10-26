@@ -52,6 +52,8 @@ ${options.mask.map((s) => `${s} *`).join(', ')} { visibility: hidden !important;
   }
   const w = options.waitFor
   if (typeof w === 'number') await page.waitForTimeout(w)
+  // "2000ms" is a delay: no selector looks like that.
+  else if (typeof w === 'string' && /^\d+ms$/i.test(w)) await page.waitForTimeout(parseInt(w, 10))
   else if (typeof w === 'string') await page.waitForSelector(w, { timeout: options.timeoutMs })
   else if (typeof w === 'function') await w(page)
 

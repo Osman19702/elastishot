@@ -50,6 +50,10 @@ export interface PairReport {
 export interface ReportConfig {
   threshold: number
   failOn: RegionKind[] | 'none'
+  /** The command that made the run; approve promotes only from `run`. Absent in reports before 0.3. */
+  command?: 'compare' | 'run' | 'pr'
+  /** The baseline folder the run compared against. */
+  baselineDir?: string
 }
 
 export interface ReportTotals {

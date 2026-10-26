@@ -70,8 +70,10 @@ export async function writePairArtifacts(runDir: string, input: PairWriteInput, 
       refs[file] = rel(file)
     }
   }
-  // The candidate is stored like a snapshot so `approve` can promote it.
-  if (!inline && input.candidate.snapshot) {
+  // The candidate is stored like a snapshot so `approve` can promote it. A
+  // single-file report still needs those files for pairs `approve` accepts
+  // (a target and a viewport); the pages themselves never reference them.
+  if (input.candidate.snapshot && (!inline || (input.target && input.viewport?.name))) {
     await writeSnapshotDir(dir, { ...input.candidate.snapshot, png: input.candidate.snapshot.png ?? encodePng(input.candidate.image) }, CANDIDATE_FILES)
   }
   if (!inline && input.baseline.elementMap) await writeFile(path.join(dir, 'baseline.map.json'), JSON.stringify(input.baseline.elementMap))

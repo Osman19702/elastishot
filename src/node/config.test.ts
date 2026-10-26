@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, before, test } from 'node:test'
@@ -76,4 +76,16 @@ test('validation names the offending key', () => {
   bad({ targets: [{ name: 'x', url: 'https://x', foo: 1 }] }, /unknown key "foo"/)
   bad({ report: { images: 'blob' } }, /report\.images/)
   assert.throws(() => resolveConfig({ viewports: [{ name: 'd', width: 1, height: 1 }], targets: [{ name: 'x', url: 'https://x', viewports: ['tablet'] }] }, '/tmp'), /unknown viewport "tablet"/)
+})
+
+test('the nearest config in a parent folder is found, and a .cjs config loads', async () => {
+  const root = path.join(tmp, 'monorepo')
+  const app = path.join(root, 'packages', 'app')
+  await mkdir(app, { recursive: true })
+  await writeFile(path.join(root, 'elastishot.config.cjs'), "module.exports = { threshold: 0.9, targets: [{ name: 'home', url: 'https://a.test/' }] }\n")
+  const c = await loadConfig(app)
+  assert.equal(c.configPath, path.join(root, 'elastishot.config.cjs'))
+  assert.equal(c.rootDir, root)
+  assert.equal(c.threshold, 0.9)
+  assert.equal(c.baselineDir, path.join(root, 'baselines'))
 })

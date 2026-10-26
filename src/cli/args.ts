@@ -26,19 +26,21 @@ Commands
 
 Options
   --out <dir>             Output folder (snapshot: the baseline folder; compare/run: the run folder)
-  --config <file>         elastishot.config.(js|mjs|json) (default: discovered in the current folder)
+  --config <file>         elastishot.config.(js|mjs|cjs|json) (default: found in this folder or a parent)
+  --no-config             compare: ignore any config file and use the defaults
   --name <name>           Name of the pair or snapshot (default: derived from the candidate)
   --threshold <0..1>      Minimum similarity to pass (default 0.98)
   --fail-on <kinds>       Comma list of added,removed,changed,moved, or none (default: all)
-  --viewport <WxH[@dpr]>  Viewport for page captures, e.g. 1280x800 or 390x844@2
+  --viewport <WxH[@dpr]>  Viewport for page captures, e.g. 1280x800 or 390x844@2, or a config viewport name
   --full-page             Capture the whole scrollable page
-  --wait-for <sel|ms>     Wait for a selector or a delay before capturing
+  --wait-for <sel|ms>     Wait for a selector, or a delay such as 2000 or 2000ms, before capturing
   --hide <selector>       Hide matching elements before capturing (repeatable)
   --no-map                Skip the element map
   --junit                 Also write junit.xml into the run folder
   --junit-file <file>     Write JUnit XML to this file
   --single-file           Inline every image into the HTML reports
   --update                run: write missing baselines instead of failing them
+  --force                 run --update: also replace baselines that differ from this capture
   --all                   approve: promote every failed or new pair
   --json                  Print the result as one JSON object and nothing else
   --quiet                 Print only the summary line
@@ -55,10 +57,13 @@ export interface ParsedArgs {
   positionals: string[]
   out?: string
   config?: string
+  noConfig: boolean
   name?: string
   threshold?: number
   failOn?: RegionKind[] | 'none'
   viewport?: ViewportConfig
+  /** --viewport given as a name rather than WxH; resolved against the config's viewports. */
+  viewportName?: string
   fullPage?: boolean
   waitFor?: string | number
   hide: string[]
@@ -67,6 +72,7 @@ export interface ParsedArgs {
   junitFile?: string
   singleFile: boolean
   update: boolean
+  force: boolean
   all: boolean
   json: boolean
   quiet: boolean
@@ -74,11 +80,57 @@ export interface ParsedArgs {
   version: boolean
 }
 
+const VIEWPORT = /^(\d+)x(\d+)(?:@(\d+(?:\.\d+)?))?$/i
+
 export function parseViewport(value: string): ViewportConfig {
-  const m = /^(\d+)x(\d+)(?:@(\d+(?:\.\d+)?))?$/i.exec(value.trim())
+  const m = VIEWPORT.exec(value.trim())
   if (!m) throw new UsageError(`--viewport must look like 1280x800 or 390x844@2, got "${value}"`)
   const dpr = m[3] ? Number(m[3]) : undefined
   return { name: value.trim(), width: Number(m[1]), height: Number(m[2]), ...(dpr ? { deviceScaleFactor: dpr } : {}) }
+}
+
+/**
+ * The viewport a --viewport value means against the configured ones: a name
+ * picks that viewport, and a WxH[@dpr] that matches one takes its name, so a
+ * snapshot lands in the baseline folder `run` reads.
+ */
+export function resolveViewportArg(args: Pick<ParsedArgs, 'viewport' | 'viewportName'>, configured: ViewportConfig[]): ViewportConfig | undefined {
+  if (args.viewportName !== undefined) {
+    const named = configured.find((v) => v.name === args.viewportName)
+    if (!named) throw new UsageError(`--viewport "${args.viewportName}" is neither WxH[@dpr] nor a configured viewport (configured: ${configured.map((v) => v.name).join(', ')})`)
+    return named
+  }
+  const v = args.viewport
+  if (!v) return undefined
+  const same = configured.find((c) => c.width === v.width && c.height === v.height && (c.deviceScaleFactor ?? 1) === (v.deviceScaleFactor ?? 1))
+  return same ?? v
+}
+
+/**
+ * The options each command reads. Anything else is a usage error rather than
+ * a flag that is parsed and then silently dropped.
+ */
+const COMMAND_OPTIONS: Record<Command, readonly string[]> = {
+  compare: ['out', 'config', 'no-config', 'name', 'threshold', 'fail-on', 'viewport', 'full-page', 'wait-for', 'hide', 'no-map', 'junit', 'junit-file', 'single-file', 'json', 'quiet'],
+  snapshot: ['out', 'config', 'name', 'viewport', 'full-page', 'wait-for', 'hide', 'no-map', 'json'],
+  run: ['out', 'config', 'threshold', 'fail-on', 'full-page', 'wait-for', 'hide', 'no-map', 'junit', 'junit-file', 'single-file', 'update', 'force', 'json', 'quiet'],
+  approve: ['config', 'all', 'json'],
+  report: ['config', 'junit', 'junit-file', 'json', 'quiet'],
+}
+
+const HINTS: Record<string, string> = {
+  'run --viewport': 'run captures the viewports in the config; name one target viewport as target/viewport',
+  'run --name': 'run names its pairs after the config targets',
+  'run --no-config': 'run needs the targets from a config file',
+}
+
+function checkOptions(command: Command, given: string[]): void {
+  const allowed = COMMAND_OPTIONS[command]
+  for (const option of given) {
+    if (option === 'help' || option === 'version' || allowed.includes(option)) continue
+    const hint = HINTS[`${command} --${option}`]
+    throw new UsageError(`--${option} does not apply to ${command}${hint ? `: ${hint}` : ` (${command} takes ${allowed.map((o) => `--${o}`).join(', ')})`}`)
+  }
 }
 
 export function parseFailOn(value: string): RegionKind[] | 'none' {
@@ -99,22 +151,35 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
   const v = parsed.values
   const [command, ...positionals] = parsed.positionals
   if (command !== undefined && !COMMANDS.includes(command as Command)) throw new UsageError(`unknown command "${command}" (commands: ${COMMANDS.join(', ')})`)
+  if (command !== undefined) checkOptions(command as Command, Object.keys(v))
   let threshold: number | undefined
   if (v.threshold !== undefined) {
     threshold = Number(v.threshold)
     if (!(threshold >= 0 && threshold <= 1)) throw new UsageError(`--threshold must be between 0 and 1, got "${v.threshold}"`)
   }
   let waitFor: string | number | undefined
-  if (v['wait-for'] !== undefined) waitFor = /^\d+$/.test(v['wait-for']) ? Number(v['wait-for']) : v['wait-for']
+  // 2000 and 2000ms are delays; a selector never looks like either.
+  if (v['wait-for'] !== undefined) waitFor = /^\d+(ms)?$/i.test(v['wait-for']) ? parseInt(v['wait-for'], 10) : v['wait-for']
+  let viewport: ViewportConfig | undefined
+  let viewportName: string | undefined
+  if (v.viewport !== undefined) {
+    if (VIEWPORT.test(v.viewport.trim())) viewport = parseViewport(v.viewport)
+    else if (/^[\w.-]+$/.test(v.viewport.trim())) viewportName = v.viewport.trim()
+    else parseViewport(v.viewport)
+  }
+  if (v.force && !v.update) throw new UsageError('--force only works with --update: run --update --force replaces baselines that differ')
+  if (v['no-config'] && v.config !== undefined) throw new UsageError('--config and --no-config cannot be used together')
   return {
     command: (command as Command | undefined) ?? null,
     positionals,
     ...(v.out !== undefined ? { out: v.out } : {}),
     ...(v.config !== undefined ? { config: v.config } : {}),
+    noConfig: v['no-config'] ?? false,
     ...(v.name !== undefined ? { name: v.name } : {}),
     ...(threshold !== undefined ? { threshold } : {}),
     ...(v['fail-on'] !== undefined ? { failOn: parseFailOn(v['fail-on']) } : {}),
-    ...(v.viewport !== undefined ? { viewport: parseViewport(v.viewport) } : {}),
+    ...(viewport ? { viewport } : {}),
+    ...(viewportName !== undefined ? { viewportName } : {}),
     ...(v['full-page'] !== undefined ? { fullPage: v['full-page'] } : {}),
     ...(waitFor !== undefined ? { waitFor } : {}),
     hide: v.hide ?? [],
@@ -123,6 +188,7 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
     ...(v['junit-file'] !== undefined ? { junitFile: v['junit-file'] } : {}),
     singleFile: v['single-file'] ?? false,
     update: v.update ?? false,
+    force: v.force ?? false,
     all: v.all ?? false,
     json: v.json ?? false,
     quiet: v.quiet ?? false,
@@ -134,6 +200,7 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
 const OPTIONS = {
   out: { type: 'string' },
   config: { type: 'string' },
+  'no-config': { type: 'boolean' },
   name: { type: 'string' },
   threshold: { type: 'string' },
   'fail-on': { type: 'string' },
@@ -146,6 +213,7 @@ const OPTIONS = {
   'junit-file': { type: 'string' },
   'single-file': { type: 'boolean' },
   update: { type: 'boolean' },
+  force: { type: 'boolean' },
   all: { type: 'boolean' },
   json: { type: 'boolean' },
   quiet: { type: 'boolean' },

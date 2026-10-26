@@ -79,7 +79,7 @@ export interface ResolvedTarget {
   key: string
 }
 
-export const CONFIG_FILES = ['elastishot.config.js', 'elastishot.config.mjs', 'elastishot.config.json']
+export const CONFIG_FILES = ['elastishot.config.js', 'elastishot.config.mjs', 'elastishot.config.cjs', 'elastishot.config.json']
 export const DEFAULT_VIEWPORTS: ViewportConfig[] = [{ name: 'desktop', width: 1280, height: 800 }]
 
 const KNOWN_KEYS = new Set(['baselineDir', 'outDir', 'threshold', 'failOn', 'minRegionScore', 'viewports', 'capture', 'compare', 'locators', 'report', 'targets', 'reporters'])
@@ -172,20 +172,27 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-/** Load the config file (explicit path, or discovered in cwd); no file means defaults. */
+/** The nearest config file in cwd or the folders above it, the way npm finds package.json. */
+export async function findConfigFile(cwd: string): Promise<string | null> {
+  for (let dir = path.resolve(cwd); ; ) {
+    for (const name of CONFIG_FILES) {
+      const p = path.join(dir, name)
+      if (await exists(p)) return p
+    }
+    const parent = path.dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
+/** Load the config file (explicit path, or the nearest one from cwd up); no file means defaults. */
 export async function loadConfig(cwd = process.cwd(), explicitPath?: string): Promise<ResolvedConfig> {
   let file: string | null = null
   if (explicitPath) {
     file = path.resolve(cwd, explicitPath)
     if (!(await exists(file))) throw new ElastishotError('E_CONFIG', `config file not found: ${file}`)
   } else {
-    for (const name of CONFIG_FILES) {
-      const p = path.join(cwd, name)
-      if (await exists(p)) {
-        file = p
-        break
-      }
-    }
+    file = await findConfigFile(cwd)
   }
   if (!file) return resolveConfig({}, cwd, null)
   let raw: unknown

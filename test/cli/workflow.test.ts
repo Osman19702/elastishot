@@ -78,9 +78,13 @@ test('approve promotes the candidate and the next run passes', async () => {
   const listing = io()
   assert.equal(await main(['approve'], listing), 2)
   assert.match(listing.err[0]!, /candidates .*home\/desktop/)
+  // An ad-hoc compare between run and approve moves `latest`; approve still finds the run.
+  const adhoc = io()
+  assert.equal(await main(['compare', path.resolve('test/fixtures/images/base.png'), path.resolve('test/fixtures/images/base.png'), '--quiet'], adhoc), 0, adhoc.err.join('\n'))
   const approve = io()
   assert.equal(await main(['approve', 'home', '--json'], approve), 0, approve.err.join('\n'))
   assert.deepEqual(JSON.parse(approve.out[0]!).approved, ['home/desktop'])
+  assert.match(approve.err.join('\n'), /was made by compare; approving from .*the latest run made by run/)
   const meta = JSON.parse(await readFile(path.join(tmp, 'baselines', 'home', 'desktop', 'meta.json'), 'utf8'))
   assert.ok(meta.approvedAt)
   const again = io()
@@ -108,4 +112,37 @@ test('snapshot writes a baseline folder for a URL', async () => {
   assert.equal(info.meta.dpr, 2)
   assert.ok(info.elements > 10)
   assert.equal(info.dir, path.join(tmp, 'baselines', 'landing', '390x844-2'))
+})
+
+test('run applies capture flags, and a --single-file run can still be approved', async () => {
+  await writeConfig('v1') // the baseline is v2 since the approve above
+  const run = io()
+  assert.equal(await main(['run', '--single-file', '--no-map', '--json'], run), 1, run.err.join('\n'))
+  const report = JSON.parse(run.out[0]!)
+  assert.equal(report.config.command, 'run')
+  assert.equal(report.pairs[0].status, 'failed')
+  assert.equal(report.pairs[0].candidate.map, false)
+  const approve = io()
+  assert.equal(await main(['approve', 'home', '--json'], approve), 0, approve.err.join('\n'))
+  assert.deepEqual(JSON.parse(approve.out[0]!).approved, ['home/desktop'])
+})
+
+test('run --update --force replaces a baseline that drifted', async () => {
+  await writeConfig('v2') // the baseline is v1 again
+  const forced = io()
+  assert.equal(await main(['run', '--update', '--force', '--json'], forced), 0, forced.err.join('\n'))
+  const pair = JSON.parse(forced.out[0]!).pairs[0]
+  assert.equal(pair.status, 'failed')
+  assert.ok(pair.failReasons.some((r: string) => /baseline replaced/.test(r)), pair.failReasons.join('; '))
+  const meta = JSON.parse(await readFile(path.join(tmp, 'baselines', 'home', 'desktop', 'meta.json'), 'utf8'))
+  assert.ok(meta.approvedFrom)
+  const again = io()
+  assert.equal(await main(['run'], again), 0, again.err.join('\n'))
+  assert.match(again.out[0]!, /^PASS home \[desktop\]/)
+})
+
+test('snapshot --viewport takes a configured viewport name', async () => {
+  const s = io()
+  assert.equal(await main(['snapshot', `${server.url}/v1/`, '--name', 'landing', '--viewport', 'desktop', '--json'], s), 0, s.err.join('\n'))
+  assert.equal(JSON.parse(s.out[0]!).dir, path.join(tmp, 'baselines', 'landing', 'desktop'))
 })
