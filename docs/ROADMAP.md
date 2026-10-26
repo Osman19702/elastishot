@@ -102,11 +102,59 @@ GitHub App, approval in the browser. It consumes the same public report
 format and is an opt-in reporter; the CLI never contacts it unless
 configured.
 
+## Native screenshots
+
+Image pairs from emulators, simulators, Maestro, Detox and Appium already
+compare today; [MOBILE.md](MOBILE.md) has the recipe. These items would bring
+native screenshots into the baseline workflow. They are ranked by value for
+effort.
+
+1. **File and command targets.** A target can be a PNG (`image`) or a command
+   that writes one, next to `url`. `snapshot --from <png>` creates a baseline
+   folder, and `compare --pairs <json>` puts N pairs in one run folder.
+2. **Device presets.** `devices[]` with status-bar and home-indicator masks and
+   per-device diff tolerances, plus a `DEVICE_SIZE_MISMATCH` warning.
+3. **Native element maps.** Converters from Maestro hierarchies, `uiautomator`
+   dumps, Appium page source, Detox view hierarchies and `idb` to
+   `elastishot.element-map/1`; an `elastishot map` command; and per-side maps
+   on `compare`.
+4. **Ignore by locator for native maps,** with `id=` and `text=` selectors.
+5. **Capture conditions in `meta.json`:** device, OS, locale, appearance and
+   font scale, and a `BASELINE_CONDITIONS_DIFFER` warning.
+6. **Drift between platforms:** compare the changed-locator sets of two runs,
+   for example web against native or iOS against Android.
+7. **Stitching** of scroll series, and a `group` per pair for galleries.
+8. **A capture adapter contract** that does not import Playwright, so a
+   Maestro-backed adapter can be configured.
+9. **Report details:** device and appearance on the pair page, and the device
+   in JUnit names.
+
+## Smaller items from field use
+
+These came out of capturing a React-Native-for-Web app, but each one helps
+ordinary web pages too.
+
+- `capture.waitForQuiet`: wait until the DOM stops changing for N ms, for
+  animations driven by `requestAnimationFrame` and lists that render in
+  batches.
+- **"Added" for content in empty space.** A block that appears where the
+  baseline had only background is reported as `changed`; it could be reported
+  as `added`.
+- **Device emulation:** `viewports[].device` mapped to Playwright's device
+  descriptors (mobile, touch, user agent, pixel ratio), and a warning when
+  content overflows the viewport sideways.
+- **A font and platform guard:** record the platform and the resolved body
+  font, and warn when a baseline and a candidate come from different platforms.
+- **Colour-scheme and locale expansion** like viewports, so each target does not
+  have to be repeated per theme.
+- **Dialog policy** (`accept`, `dismiss` or `fail`) and stubs for browser APIs
+  that interrupt a capture.
+- **Scenario steps in config:** JSON steps (`click`, `scrollTo`) that reach a
+  state without a JS `waitFor` function.
+- **Inner scroll containers:** capture the full height of an element that
+  scrolls inside a fixed body.
+
 ## How to influence this
 
 Open an issue with a pair of screenshots that Elastishot gets wrong. Real
 pairs move items up this list faster than anything else.
-
-Notes gathered while integrating Elastishot into a mobile and React-Native-web app
-(Expo), with a ranked enhancement list for native screenshots and the capture
-changes a react-native-web page needs, are in [docs/MOBILE.md](MOBILE.md).
