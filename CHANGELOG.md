@@ -6,6 +6,23 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
+The headline is `elastishot pr`. It compares the working tree with a base
+commit, both served and captured on the same machine in one run, so there are
+no baselines to commit.
+
+This release also:
+- fixes the `run` and `approve` traps found in field use;
+- adds capture setup for apps that keep state in the browser;
+- adds ignore by locator.
+
+The CLI is stricter. A flag a command does not use, or an unknown capture key
+in the config, is now an error (exit 2) where before it was silently ignored.
+
+Comparison results do not move: the UI lab still finds 43 of 43 planted
+changes, with 1 noise region.
+
 ### Fixed
 
 - **`run` no longer ignores capture flags.** `--full-page`, `--wait-for`,
@@ -414,7 +431,8 @@ First public release.
 - Four test tiers: unit, engine, browser and Gherkin acceptance scenarios
   driving the built CLI; a UI lab with ground truth under `examples/ui-lab`.
 
-[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Osman19702/elastishot/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Osman19702/elastishot/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Osman19702/elastishot/compare/v0.1.7...v0.2.0
 [0.1.7]: https://github.com/Osman19702/elastishot/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/Osman19702/elastishot/compare/v0.1.5...v0.1.6
