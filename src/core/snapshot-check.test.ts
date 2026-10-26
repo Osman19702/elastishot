@@ -45,3 +45,13 @@ test('archive and browser placeholder titles count as error pages', () => {
     assert.equal(checkSnapshot('baseline', { meta: meta({ title }) }).length, 1, title)
   }
 })
+
+test('a page that ended at another path or origin is reported as redirected', () => {
+  const at = (url: string, finalUrl?: string) => checkSnapshot('candidate', { meta: meta({ url, ...(finalUrl ? { finalUrl } : {}) }), elementMap: map(20) }).map((w) => w.code)
+  assert.deepEqual(at('https://a.test/me', 'https://a.test/onboarding'), ['CAPTURE_REDIRECTED'])
+  assert.deepEqual(at('https://a.test/', 'https://login.a.test/'), ['CAPTURE_REDIRECTED'])
+  assert.deepEqual(at('https://a.test/docs', 'https://a.test/docs/'), [])
+  assert.deepEqual(at('https://a.test/docs', 'https://a.test/docs#intro'), [])
+  assert.deepEqual(at('https://a.test/docs'), [])
+  assert.match(checkSnapshot('baseline', { meta: meta({ url: 'https://a.test/me', finalUrl: 'https://a.test/onboarding' }) })[0]!.message, /^baseline: the page was requested at https:\/\/a\.test\/me but ended at https:\/\/a\.test\/onboarding$/)
+})

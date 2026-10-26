@@ -161,11 +161,14 @@ class ElastishotImpl implements Elastishot {
   }
 
   #captureOptions(viewport?: ViewportConfig, extra?: CaptureOptions): CaptureOptions {
-    return {
+    const options: CaptureOptions = {
       ...this.config.capture,
       ...(viewport ? { viewport: { width: viewport.width, height: viewport.height }, ...(viewport.deviceScaleFactor ? { deviceScaleFactor: viewport.deviceScaleFactor } : {}) } : {}),
       ...extra,
     }
+    // A storage state file named in the config is relative to the config, wherever the command runs.
+    if (typeof options.storageState === 'string') options.storageState = path.resolve(this.config.rootDir, options.storageState)
+    return options
   }
 
   async #capture(target: CaptureTarget, captureOptions: CaptureOptions): Promise<Snapshot> {
@@ -200,7 +203,7 @@ class ElastishotImpl implements Elastishot {
       baseline,
       candidate,
       { ...this.config.compare, ...o.compare },
-      { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn },
+      { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn, ignore: this.config.ignore },
       started,
       o.images ?? this.config.report.images,
     )
@@ -258,7 +261,7 @@ class ElastishotImpl implements Elastishot {
           return ['baseline replaced by this capture (--update --force)']
         }
       : undefined
-    return this.#comparePair(runDir, meta, baseline, candidate, t.compare, { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn }, started, o.images ?? this.config.report.images, replace)
+    return this.#comparePair(runDir, meta, baseline, candidate, t.compare, { threshold: o.threshold ?? this.config.threshold, failOn: o.failOn ?? this.config.failOn, ignore: t.ignore }, started, o.images ?? this.config.report.images, replace)
   }
 
   /** Make a captured snapshot the baseline of a target and viewport, recording where it was approved from. */
@@ -287,7 +290,7 @@ class ElastishotImpl implements Elastishot {
     baseline: ResolvedSide,
     candidate: ResolvedSide,
     compareOptions: CompareOptions,
-    thresholds: { threshold: number; failOn: RegionKind[] | 'none' },
+    rules: { threshold: number; failOn: RegionKind[] | 'none'; ignore?: string[] },
     started: number,
     images: 'files' | 'inline',
     /** Runs once the verdict is known, before the pair is written; its lines join failReasons. */
@@ -301,9 +304,10 @@ class ElastishotImpl implements Elastishot {
         ...(this.#engine ? { engine: this.#engine } : {}),
         compare: { ...compareOptions, artifacts: { diffMask: true, overlay: true, warpedCandidate: true, candidateOverlay: false, ...compareOptions.artifacts } },
         locators: this.config.locators,
-        threshold: thresholds.threshold,
-        failOn: thresholds.failOn,
+        threshold: rules.threshold,
+        failOn: rules.failOn,
         minRegionScore: this.config.minRegionScore,
+        ...(rules.ignore?.length ? { ignore: rules.ignore } : {}),
       })
       status = outcome.pass ? 'passed' : 'failed'
     } catch (e) {
@@ -319,6 +323,7 @@ class ElastishotImpl implements Elastishot {
         candidate,
         result: outcome?.result ?? null,
         locators: outcome?.locators ?? null,
+        ...(outcome?.ignored.length ? { ignored: outcome.ignored } : {}),
         status,
         failReasons: [...(outcome?.failReasons ?? []), ...extraReasons],
         ...(error ? { error } : {}),

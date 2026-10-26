@@ -14,9 +14,25 @@ export interface SnapshotCheckInput {
 }
 
 /**
- * Warnings for a side that looks like an error or placeholder page. `side`
- * names the side in the messages. Sides without meta are files, which are
- * taken as they are.
+ * Whether a page ended somewhere other than where it was sent: another
+ * origin or another path. A trailing slash or a hash does not count.
+ */
+export function redirectedTo(requested: string, final: string): boolean {
+  try {
+    const a = new URL(requested)
+    const b = new URL(final)
+    const trim = (p: string) => p.replace(/\/+$/, '') || '/'
+    return a.origin !== b.origin || trim(a.pathname) !== trim(b.pathname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Warnings for a side that looks like an error or placeholder page, or that
+ * ended at another URL than the one requested (a sign-in or onboarding gate).
+ * `side` names the side in the messages. Sides without meta are files, which
+ * are taken as they are.
  */
 export function checkSnapshot(side: 'baseline' | 'candidate', input: SnapshotCheckInput): Warning[] {
   const out: Warning[] = []
@@ -27,5 +43,8 @@ export function checkSnapshot(side: 'baseline' | 'candidate', input: SnapshotChe
   if (meta.title && ERROR_TITLE.test(meta.title)) push(`the document title "${meta.title.slice(0, 80)}" looks like an error page`, { title: meta.title })
   const map = input.elementMap
   if (map && map.elements.length < MIN_ELEMENTS) push(`only ${map.elements.length} elements were found on the page`, { elements: map.elements.length })
+  if (meta.url && meta.finalUrl && redirectedTo(meta.url, meta.finalUrl)) {
+    out.push({ code: 'CAPTURE_REDIRECTED', message: `${side}: the page was requested at ${meta.url} but ended at ${meta.finalUrl}`, data: { side, url: meta.url, finalUrl: meta.finalUrl } })
+  }
   return out
 }

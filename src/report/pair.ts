@@ -110,6 +110,14 @@ function metaTable(p: PairReport): string {
   }
   status('Baseline page', p.baseline.meta)
   status('Candidate page', p.candidate.meta)
+  const conditions = (side: string, meta: PairReport['baseline']['meta']) => {
+    if (!meta) return
+    if (meta.finalUrl) rows.push([`${side} ended at`, meta.finalUrl])
+    const set = [meta.colorScheme, meta.locale, meta.timezoneId, meta.reducedMotion === 'no-preference' ? 'motion on' : ''].filter(Boolean)
+    if (set.length) rows.push([`${side} conditions`, set.join(' · ')])
+  }
+  conditions('Baseline', p.baseline.meta)
+  conditions('Candidate', p.candidate.meta)
   if (p.viewport) rows.push(['Viewport', `${p.viewport.width}x${p.viewport.height}${p.viewport.deviceScaleFactor ? ` @${p.viewport.deviceScaleFactor}x` : ''}`])
   if (p.alignment) {
     rows.push(['Alignment', `${p.alignment.method}, scale ${p.alignment.scale.toFixed(3)}, confidence ${pct(p.alignment.confidence)}`])
@@ -214,6 +222,13 @@ ${
     ? `<details><summary>Seen in the DOM only (${mapOnly.length})</summary>
 <p class="muted">Elements the element maps found on one side only, or whose size changed, with no pixel change attributed to them.</p>
 ${foldedTable('<th>Element</th><th>Locator</th><th>Kinds</th><th>Presence</th>', mapOnly.map(mapOnlyRow), foldAfter, 'elements')}</details>`
+    : ''
+}
+${
+  p.ignored?.length
+    ? `<details><summary>Ignored (${p.ignored.length})</summary>
+<p class="muted">Elements left out of the comparison through <code>ignore</code>, on the side whose element map named them.</p>
+${foldedTable('<th>Ignore</th><th>Element</th><th>Side</th><th>Box</th>', p.ignored.map((g) => `<tr><td><code>${escapeHtml(g.selector)}</code></td><td>${locatorCell(g.locator)}</td><td>${g.side}</td><td>${formatBox(g.box)}</td></tr>`), foldAfter, 'elements')}</details>`
     : ''
 }
 ${p.locators?.unmapped.length ? `<p class="muted">Regions with no element behind them: ${escapeHtml(p.locators.unmapped.join(', '))}</p>` : ''}

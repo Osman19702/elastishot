@@ -89,3 +89,24 @@ test('the nearest config in a parent folder is found, and a .cjs config loads', 
   assert.equal(c.threshold, 0.9)
   assert.equal(c.baselineDir, path.join(root, 'baselines'))
 })
+
+test('capture options are validated, and targets carry their ignore and expect', () => {
+  const bad = (raw: unknown, re: RegExp) => assert.throws(() => validateConfig(raw), (e: unknown) => isElastishotError(e, 'E_CONFIG') && re.test((e as Error).message))
+  bad({ capture: { locael: 'en-GB' } }, /config\.capture: unknown key "locael"/)
+  bad({ capture: { animations: 'skip' } }, /animations must be "freeze" or "finish"/)
+  bad({ capture: { reducedMotion: 'off' } }, /reducedMotion must be/)
+  bad({ capture: { clock: { time: true } } }, /clock must be/)
+  bad({ capture: { clock: { time: 0, mode: 'slow' } } }, /clock must be/)
+  bad({ targets: [{ name: 'x', url: 'https://x', capture: { waitFor: 1, foo: 1 } }] }, /targets\[0\]\.capture: unknown key "foo"/)
+  bad({ ignore: ['ok', ''] }, /ignore must be an array of locators/)
+  bad({ targets: [{ name: 'x', url: 'https://x', expect: 7 }] }, /expect must be a selector/)
+  const raw = validateConfig({
+    ignore: ['[data-testid=clock]'],
+    capture: { locale: 'en-GB', clock: { time: '2026-01-15T09:41:00Z', mode: 'install' }, animations: 'finish', storageState: { cookies: [], origins: [] } },
+    targets: [{ name: 'home', url: 'https://a.test/', ignore: ['#ad'], expect: '[data-testid="screen-home"]' }],
+  })
+  const [home] = resolveTargets(resolveConfig(raw, '/tmp'))
+  assert.deepEqual(home!.ignore, ['[data-testid=clock]', '#ad'])
+  assert.equal(home!.capture.expect, '[data-testid="screen-home"]')
+  assert.equal(home!.capture.locale, 'en-GB')
+})

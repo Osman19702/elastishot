@@ -146,3 +146,29 @@ test('snapshot --viewport takes a configured viewport name', async () => {
   assert.equal(await main(['snapshot', `${server.url}/v1/`, '--name', 'landing', '--viewport', 'desktop', '--json'], s), 0, s.err.join('\n'))
   assert.equal(JSON.parse(s.out[0]!).dir, path.join(tmp, 'baselines', 'landing', 'desktop'))
 })
+
+test('ignore leaves the named elements out on each side and says what it could not find', async () => {
+  // The baseline is v2 since the --force test; v1 changes the badge, the cta and the FAQ.
+  await writeFile(
+    path.join(tmp, 'elastishot.config.json'),
+    JSON.stringify({
+      viewports: [{ name: 'desktop', width: 1280, height: 800 }],
+      capture: { fullPage: true },
+      ignore: ['[data-testid=badge]', '.not-in-any-map'],
+      targets: [{ name: 'home', url: `${server.url}/v1/`, ignore: ['[data-testid="cta"]'] }],
+    }),
+  )
+  const r = io()
+  assert.equal(await main(['run', '--json'], r), 1, r.err.join('\n'))
+  const report = JSON.parse(r.out[0]!)
+  const pair = report.pairs[0]
+  const changed = pair.locators.changedLocators.filter((l: { evidence: string[] }) => l.evidence.includes('pixels')).map((l: { locator: string }) => l.locator)
+  assert.ok(!changed.includes('[data-testid="badge"]') && !changed.includes('[data-testid="cta"]'), changed.join(', '))
+  assert.ok(changed.some((l: string) => l.startsWith('#faq')), changed.join(', '))
+  // The badge exists in v2 only, so it is ignored on the baseline side; the cta on both.
+  const ignored = pair.ignored.map((g: { side: string; locator: string }) => `${g.side} ${g.locator}`)
+  assert.deepEqual(ignored.sort(), ['baseline [data-testid="badge"]', 'baseline [data-testid="cta"]', 'candidate [data-testid="cta"]'])
+  assert.ok(pair.summary.warnings.some((w: { code: string; message: string }) => w.code === 'IGNORE_UNRESOLVED' && /\.not-in-any-map/.test(w.message)))
+  const html = await readFile(path.join(tmp, '.elastishot', 'runs', report.runId, 'pairs', pair.id, 'report.html'), 'utf8')
+  assert.match(html, /<summary>Ignored \(3\)<\/summary>/)
+})

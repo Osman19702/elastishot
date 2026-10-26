@@ -42,9 +42,50 @@ uses [Semantic Versioning](https://semver.org/).
   so the baseline lands in the folder `run` reads.
 - **Config discovery:** the config file is found in the current folder or the
   nearest parent folder, and `elastishot.config.cjs` is recognised.
+- **Capture setup before the page loads.**
+  - `capture.locale` and `capture.timezoneId`.
+  - `capture.clock`, which pins `Date.now()`, or starts a fake clock with
+    `mode: 'install'`. Needs Playwright 1.45 or newer.
+  - `capture.setup(page, context)` in a JS config: seed storage, add cookies,
+    route requests.
+  - `capture.storageState` also takes the state object itself. A file path is
+    now resolved against the config folder rather than the current folder.
+
+  Together these remove the need for a custom capture adapter in most apps
+  that keep state in the browser.
+- **`capture.reducedMotion`:** `'reduce'` stays the default; `'no-preference'`
+  captures an app's animated state.
+- **`capture.animations: 'finish'`** fast-forwards running animations and
+  transitions to their end, so `animationend` and `transitionend` handlers run.
+  The default `'freeze'` turns them off as before. Some components only reach
+  their final state in those handlers; React Native for Web's `Modal` sets
+  `role="dialog"` there.
+- **`expect` per target (and `capture.expect`):** a selector the ready page
+  must show. Without it, the capture fails instead of becoming a baseline of a
+  sign-in page or an empty app shell.
+- **A `CAPTURE_REDIRECTED` warning** when a page ends at another path or origin
+  than the one requested. `meta.json` records the final URL, and the colour
+  scheme, motion setting, locale and time zone of the capture. The pair page
+  shows them.
+- **Ignore by locator.** `ignore: ['[data-testid=clock]', '#ad']`, in the
+  config and per target, looks each locator up in both element maps. It
+  leaves that element's boxes out on each side, wherever the element landed.
+  - It works on existing baselines, because their maps are stored with them.
+  - Locators no map records raise an `IGNORE_UNRESOLVED` warning.
+  - The pair page lists what was ignored.
 
 ### Changed
 
+- **Capture options in the config are validated** like the rest of the config.
+  An unknown key or a wrong value is now an `E_CONFIG` error instead of being
+  dropped.
+- **Element maps follow the picture more closely.**
+  - When a page scrolls inside a fixed body, elements below the captured
+    picture are clipped or dropped instead of naming pixels that do not exist.
+  - An `aria-hidden` or `inert` subtree that another layer covers, such as an
+    inactive tab scene mounted under the active one, is left out.
+  - Visible decorative icons stay.
+  - Maps of ordinary pages are unchanged.
 - **opencv.js 5.0** (`@techstark/opencv-js` 5.0.0-release.1, up from 4.12). The
   UI lab's `report.json` is identical on both versions, region for region and
   score for score, and stage timings are within run-to-run noise. The install

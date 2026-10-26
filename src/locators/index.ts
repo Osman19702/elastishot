@@ -14,6 +14,7 @@ import { presenceDiff } from './presence.ts'
 export { ELEMENT_MAP_SCHEMA, indexByLocator, isElementMap, isElementMapEntry, parseElementMap } from './element-map.ts'
 export { matchElements, type ElementMatch, type ElementRef } from './match.ts'
 export { presenceDiff, type PresenceChange, type PresenceKind } from './presence.ts'
+export { normalizeLocator, resolveIgnore, type IgnoredElement, type IgnoreResolution } from './ignore.ts'
 
 export interface LocatorOptions {
   /** An element must cover at least this fraction of a region to own it (default 0.6). */

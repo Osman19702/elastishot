@@ -6,7 +6,7 @@ import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import type { CaptureOptions } from '../capture/index.ts'
+import { CAPTURE_OPTION_KEYS, type CaptureOptions } from '../capture/index.ts'
 import { ElastishotError } from '../core/errors.ts'
 import { REGION_KINDS } from '../core/options.ts'
 import type { Box, CompareOptions, RegionKind } from '../core/types.ts'
@@ -28,6 +28,10 @@ export interface TargetConfig {
   capture?: CaptureOptions
   compare?: CompareOptions
   ignoreRegions?: Box[]
+  /** Locators whose boxes are left out of the comparison on both sides, added to the config's `ignore`. */
+  ignore?: string[]
+  /** A selector the page must show once it is ready (capture.expect for this target). */
+  expect?: string
 }
 
 export interface ReportConfigOptions {
@@ -48,6 +52,12 @@ export interface ElastishotConfig {
   locators?: LocatorOptions
   report?: ReportConfigOptions
   targets?: TargetConfig[]
+  /**
+   * Locators left out of every comparison: each one is looked up in both
+   * element maps and its boxes are ignored on that side. Test ids, ids and
+   * role locators work; for other CSS selectors use capture.mask.
+   */
+  ignore?: string[]
   /** Extra reporters (JS config only). */
   reporters?: Reporter[]
 }
@@ -66,6 +76,7 @@ export interface ResolvedConfig {
   locators: LocatorOptions
   report: Required<ReportConfigOptions>
   targets: TargetConfig[]
+  ignore: string[]
   reporters: Reporter[]
 }
 
@@ -75,6 +86,8 @@ export interface ResolvedTarget {
   viewport: ViewportConfig
   capture: CaptureOptions
   compare: CompareOptions
+  /** The config's and the target's ignore locators. */
+  ignore: string[]
   /** name/viewport, the baseline folder below baselineDir. */
   key: string
 }
@@ -82,14 +95,42 @@ export interface ResolvedTarget {
 export const CONFIG_FILES = ['elastishot.config.js', 'elastishot.config.mjs', 'elastishot.config.cjs', 'elastishot.config.json']
 export const DEFAULT_VIEWPORTS: ViewportConfig[] = [{ name: 'desktop', width: 1280, height: 800 }]
 
-const KNOWN_KEYS = new Set(['baselineDir', 'outDir', 'threshold', 'failOn', 'minRegionScore', 'viewports', 'capture', 'compare', 'locators', 'report', 'targets', 'reporters'])
-const TARGET_KEYS = new Set(['name', 'url', 'viewports', 'capture', 'compare', 'ignoreRegions'])
+const KNOWN_KEYS = new Set(['baselineDir', 'outDir', 'threshold', 'failOn', 'minRegionScore', 'viewports', 'capture', 'compare', 'locators', 'report', 'targets', 'ignore', 'reporters'])
+const TARGET_KEYS = new Set(['name', 'url', 'viewports', 'capture', 'compare', 'ignoreRegions', 'ignore', 'expect'])
+const CAPTURE_KEYS = new Set<string>(CAPTURE_OPTION_KEYS)
 
 function fail(where: string, message: string): never {
   throw new ElastishotError('E_CONFIG', `${where}: ${message}`)
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** Capture options are checked like the rest: a misspelt key used to be dropped without a word. */
+function validateCapture(where: string, c: unknown): void {
+  if (!isRecord(c)) fail(where, 'must be an object')
+  for (const k of Object.keys(c)) if (!CAPTURE_KEYS.has(k)) fail(where, `unknown key "${k}" (known: ${[...CAPTURE_KEYS].join(', ')})`)
+  const oneOf = (key: string, values: string[]) => {
+    if (c[key] !== undefined && !values.includes(c[key] as string)) fail(where, `${key} must be ${values.map((v) => `"${v}"`).join(' or ')}`)
+  }
+  oneOf('colorScheme', ['light', 'dark'])
+  oneOf('reducedMotion', ['reduce', 'no-preference'])
+  oneOf('animations', ['freeze', 'finish'])
+  oneOf('waitUntil', ['load', 'domcontentloaded', 'networkidle', 'commit'])
+  for (const key of ['locale', 'timezoneId', 'expect']) if (c[key] !== undefined && (typeof c[key] !== 'string' || !c[key])) fail(where, `${key} must be a non-empty string`)
+  if (c.setup !== undefined && typeof c.setup !== 'function') fail(where, 'setup must be a function (JS config only)')
+  if (c.storageState !== undefined && typeof c.storageState !== 'string' && !isRecord(c.storageState)) fail(where, 'storageState must be a file path or a storage state object')
+  const clock = c.clock
+  if (clock !== undefined) {
+    const time = isRecord(clock) ? clock.time : clock
+    if (!(typeof time === 'string' || typeof time === 'number') || (isRecord(clock) && clock.mode !== undefined && clock.mode !== 'fixed' && clock.mode !== 'install')) {
+      fail(where, 'clock must be an ISO date, epoch milliseconds, or { time, mode: "fixed" | "install" }')
+    }
+  }
+}
+
+function validateIgnore(where: string, ignore: unknown): void {
+  if (!Array.isArray(ignore) || !ignore.every((s) => typeof s === 'string' && s.trim())) fail(where, 'ignore must be an array of locators')
+}
 
 /** Structural validation with the path of the offending key in the message. */
 export function validateConfig(raw: unknown, where = 'config'): ElastishotConfig {
@@ -125,10 +166,15 @@ export function validateConfig(raw: unknown, where = 'config'): ElastishotConfig
       if (typeof t.name !== 'string' || !t.name) fail(at, 'needs a name')
       if (typeof t.url !== 'string' || !/^https?:\/\//i.test(t.url)) fail(at, 'needs an http(s) url')
       if (t.viewports !== undefined && (!Array.isArray(t.viewports) || !t.viewports.every((v) => typeof v === 'string'))) fail(at, 'viewports must be an array of viewport names')
+      if (t.capture !== undefined) validateCapture(`${at}.capture`, t.capture)
+      if (t.ignore !== undefined) validateIgnore(at, t.ignore)
+      if (t.expect !== undefined && (typeof t.expect !== 'string' || !t.expect)) fail(at, 'expect must be a selector')
       if (names.has(t.name as string)) fail(at, `duplicate target name "${t.name}"`)
       names.add(t.name as string)
     })
   }
+  if (c.capture !== undefined) validateCapture(`${where}.capture`, c.capture)
+  if (c.ignore !== undefined) validateIgnore(where, c.ignore)
   if (c.report !== undefined) {
     if (!isRecord(c.report)) fail(where, 'report must be an object')
     if (c.report.images !== undefined && c.report.images !== 'files' && c.report.images !== 'inline') fail(where, 'report.images must be "files" or "inline"')
@@ -159,6 +205,7 @@ export function resolveConfig(raw: ElastishotConfig, rootDir: string, configPath
     locators: raw.locators ?? {},
     report: { images: raw.report?.images ?? 'files', junit: raw.report?.junit ?? false, title: raw.report?.title ?? 'Elastishot report' },
     targets: raw.targets ?? [],
+    ignore: raw.ignore ?? [],
     reporters: raw.reporters ?? [],
   }
 }
@@ -223,8 +270,9 @@ export function resolveTargets(config: ResolvedConfig, filter: string[] = []): R
         name: t.name,
         url: t.url,
         viewport,
-        capture: { ...config.capture, ...t.capture },
+        capture: { ...config.capture, ...t.capture, ...(t.expect ? { expect: t.expect } : {}) },
         compare: { ...config.compare, ...t.compare, ...(t.ignoreRegions ? { ignoreRegions: t.ignoreRegions } : {}) },
+        ignore: [...config.ignore, ...(t.ignore ?? [])],
         key,
       })
     }

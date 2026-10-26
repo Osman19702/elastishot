@@ -39,11 +39,23 @@ function collectMain(opts: CollectOptions): CollectResult {
   const SKIP = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'NOSCRIPT', 'TEMPLATE', 'HEAD', 'TITLE', 'BR', 'WBR'])
   const doc = document
   const all: Element[] = []
+  // An aria-hidden or inert subtree that another layer covers, such as an
+  // inactive tab scene mounted under the active one, is not what the
+  // screenshot shows. One that is visible (a decorative icon) stays in.
+  const covered = (el: Element): boolean => {
+    const r = el.getBoundingClientRect()
+    const cx = r.left + r.width / 2
+    const cy = r.top + r.height / 2
+    if (r.width === 0 || r.height === 0 || cx < 0 || cy < 0 || cx >= window.innerWidth || cy >= window.innerHeight) return false
+    const top = doc.elementFromPoint(cx, cy)
+    return top !== null && !el.contains(top) && !top.contains(el)
+  }
   // An inline <svg> is one element (an icon, a logo); its paths are not.
   const walk = (node: Element): void => {
     for (const child of Array.from(node.children)) {
       const tag = child.tagName.toUpperCase()
       if (SKIP.has(tag)) continue
+      if ((child.getAttribute('aria-hidden') === 'true' || child.hasAttribute('inert')) && covered(child)) continue
       all.push(child)
       if (tag !== 'SVG') walk(child)
     }
@@ -215,6 +227,30 @@ function collectMain(opts: CollectOptions): CollectResult {
     elements.push(entry)
   }
   return { elements, truncated }
+}
+
+/**
+ * Clip element boxes (image pixels) at the right and bottom edges of the
+ * captured image, dropping the ones left smaller than minPx. A page that
+ * scrolls inside a fixed body is captured at viewport height while its
+ * elements run further down. Parent links skip dropped elements. A map that
+ * fits the image comes back unchanged.
+ */
+export function clipElements(elements: CollectedElement[], width: number, height: number, minPx: number): CollectedElement[] {
+  const kept = new Map<number, number>()
+  const out: CollectedElement[] = []
+  elements.forEach((e, i) => {
+    const w = Math.min(width, e.box.x + e.box.w) - e.box.x
+    const h = Math.min(height, e.box.y + e.box.h) - e.box.y
+    if (w < minPx || h < minPx) return
+    // Parents come before their children, so a kept parent is already in `kept`.
+    let parent = e.parent
+    while (parent !== null && !kept.has(parent)) parent = elements[parent]?.parent ?? null
+    const newParent = parent === null ? null : kept.get(parent)!
+    kept.set(i, out.length)
+    out.push(w === e.box.w && h === e.box.h && newParent === e.parent ? e : { ...e, box: { ...e.box, w, h }, parent: newParent })
+  })
+  return out
 }
 
 /** The script to pass to page.evaluate: helpers and the collector, inlined by source. */

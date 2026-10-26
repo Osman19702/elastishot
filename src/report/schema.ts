@@ -1,5 +1,5 @@
 import type { AlignmentResult, CompareSummary, DiffRegion, RegionKind, Size, SnapshotMeta } from '../core/types.ts'
-import type { LocatorReport } from '../locators/index.ts'
+import type { IgnoredElement, LocatorReport } from '../locators/index.ts'
 
 export const REPORT_SCHEMA = 'elastishot.report/1'
 
@@ -43,6 +43,8 @@ export interface PairReport {
   alignment?: AlignmentResult
   regions: DiffRegion[]
   locators?: LocatorReport
+  /** Elements left out of the comparison through `ignore`. */
+  ignored?: IgnoredElement[]
   artifacts: PairArtifacts
   durationMs?: number
 }
