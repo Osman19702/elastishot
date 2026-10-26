@@ -11,12 +11,13 @@ import type { Engine } from '../core/engine-seam.ts'
 import { ElastishotError } from '../core/errors.ts'
 import type { CompareOptions, RegionKind, Snapshot } from '../core/types.ts'
 import { comparePair, type Plugin, type Reporter, type ReporterOutput } from '../pipeline.ts'
-import { buildReport, isReportJson, type PairReport, type PairStatus, type ReportJson } from '../report/schema.ts'
+import { buildReport, isReportJson, type PairReport, type PairStatus, type PrContext, type ReportJson } from '../report/schema.ts'
 import { writePairArtifacts } from './artifacts.ts'
 import { BASELINE_FILES, CANDIDATE_FILES, isSnapshotDir, readSnapshotDir, writeSnapshotDir } from './baselines.ts'
 import { loadConfig, resolveConfig, resolveTargets, validateConfig, type ElastishotConfig, type ResolvedConfig, type ResolvedTarget, type ViewportConfig } from './config.ts'
 import { resolveInput, type ResolvedSide, type SideInput } from './inputs.ts'
-import { htmlReporter, jsonReporter, junitReporter } from './reporters.ts'
+import { openSides, prTargets, type Cleanup, type OpenedSides } from './pr.ts'
+import { htmlReporter, jsonReporter, junitReporter, markdownReporter } from './reporters.ts'
 import { baselineDirFor, makeRunId, pairId, readLatest, slug, writeLatest } from './runs.ts'
 import { ELASTISHOT_VERSION } from './version.ts'
 
@@ -63,6 +64,8 @@ export interface RunCallOptions {
   failOn?: RegionKind[] | 'none'
   /** Capture options applied to every target, over the config's. */
   capture?: CaptureOptions
+  /** Resolve relative target URLs against this instead of the config's baseUrl. */
+  baseUrl?: string
   out?: string
   runId?: string
   images?: 'files' | 'inline'
@@ -83,6 +86,33 @@ export interface ApproveCallOptions {
   all?: boolean
 }
 
+export interface PrCallOptions {
+  targets?: string[]
+  /** The commit to compare against; by default chosen as node/git.ts explains. */
+  base?: string
+  /** Keep the base worktree and the temporary folder, and print where they are. */
+  keep?: boolean
+  threshold?: number
+  failOn?: RegionKind[] | 'none'
+  /** Capture options applied to every target on both sides, over the config's. */
+  capture?: CaptureOptions
+  out?: string
+  runId?: string
+  images?: 'files' | 'inline'
+  junit?: boolean | string
+  signal?: AbortSignal
+  /** Progress: the base chosen, install and build output, servers. */
+  log?: (line: string) => void
+  /** Environment for choosing the base (GITHUB_BASE_REF); default process.env. */
+  env?: Record<string, string | undefined>
+  /** Open the two sides another way: a test, or two deployed origins (a preview against production). */
+  openSides?: (cleanup: Cleanup[]) => Promise<OpenedSides>
+}
+
+export interface PrResult extends RunResult {
+  context: PrContext
+}
+
 export interface ApproveResult {
   approved: string[]
   candidates: string[]
@@ -98,6 +128,8 @@ export interface Elastishot {
   snapshot(target: string | CaptureTarget, options?: SnapshotCallOptions): Promise<{ snapshot: Snapshot; dir: string }>
   compare(baseline: SideInput, candidate: SideInput, options?: CompareCallOptions): Promise<RunResult>
   run(options?: RunCallOptions): Promise<RunResult>
+  /** Compare the working tree with a base commit, both served here, with no committed baselines. */
+  pr(options?: PrCallOptions): Promise<PrResult>
   approve(options?: ApproveCallOptions): Promise<ApproveResult>
   close(): Promise<void>
 }
@@ -171,9 +203,9 @@ class ElastishotImpl implements Elastishot {
     return options
   }
 
-  async #capture(target: CaptureTarget, captureOptions: CaptureOptions): Promise<Snapshot> {
+  async #capture(target: CaptureTarget, captureOptions: CaptureOptions, side?: 'base' | 'head'): Promise<Snapshot> {
     const snapshot = await this.#adapterOrCreate().capture(target, captureOptions)
-    for (const p of this.#plugins) await p.onCaptured?.({ target, snapshot })
+    for (const p of this.#plugins) await p.onCaptured?.({ target, snapshot, ...(side ? { side } : {}) })
     return snapshot
   }
 
@@ -211,7 +243,7 @@ class ElastishotImpl implements Elastishot {
   }
 
   async run(o: RunCallOptions = {}): Promise<RunResult> {
-    const targets = resolveTargets(this.config, o.targets ?? [])
+    const targets = resolveTargets(this.config, o.targets ?? [], o.baseUrl ? { baseUrl: o.baseUrl } : {})
     if (!targets.length) throw new ElastishotError('E_USAGE', this.config.configPath ? `no targets in ${this.config.configPath}` : 'no config file found; create elastishot.config.js with targets')
     const runId = o.runId ?? makeRunId()
     const runDir = path.resolve(this.config.rootDir, o.out ?? path.join(this.config.outDir, runId))
@@ -226,23 +258,100 @@ class ElastishotImpl implements Elastishot {
     })
   }
 
-  async #runTarget(runDir: string, t: ResolvedTarget, o: RunCallOptions): Promise<PairReport> {
+  async pr(o: PrCallOptions = {}): Promise<PrResult> {
+    const log = o.log ?? (() => undefined)
+    if (!this.config.targets.length) throw new ElastishotError('E_USAGE', this.config.configPath ? `no targets in ${this.config.configPath}` : 'no config file found; create elastishot.config.js with targets')
+    // URL and target-name mistakes fail before any git, install or build work.
+    prTargets(this.config, o.targets ?? [], 'http://127.0.0.1')
+    const runId = o.runId ?? makeRunId()
+    const runDir = path.resolve(this.config.rootDir, o.out ?? path.join(this.config.outDir, runId))
+    const cleanup: Cleanup[] = []
+    try {
+      const sides = o.openSides
+        ? await o.openSides(cleanup)
+        : await openSides({
+            configRoot: this.config.rootDir,
+            pr: this.config.pr,
+            ...(o.base ? { base: o.base } : {}),
+            ...(o.keep ? { keep: true } : {}),
+            env: o.env ?? process.env,
+            log,
+            ...(o.signal ? { signal: o.signal } : {}),
+            cleanup,
+          })
+      const pr: PrSide = {
+        baselineDir: path.join(sides.tmp, 'baselines'),
+        absent: new Map(),
+        baseLabel: `${sides.base.ref}@${sides.base.sha.slice(0, 7)}`,
+        headLabel: sides.head.dirty ? 'working tree' : `HEAD@${sides.head.sha.slice(0, 7)}`,
+      }
+      // The base pass only captures: its snapshots are this run's baselines.
+      const baseTargets = prTargets(this.config, o.targets ?? [], sides.base.origin)
+      for (const t of baseTargets) {
+        checkAbort(o.signal)
+        try {
+          const snapshot = await this.#capture({ url: t.url, name: t.name }, this.#captureOptions(t.viewport, { ...t.capture, ...o.capture }), 'base')
+          // A page the branch adds answers 404 on the base: new on the head side, not an error.
+          if ((snapshot.meta.httpStatus ?? 200) >= 400) {
+            pr.absent.set(t.key, `HTTP ${snapshot.meta.httpStatus}`)
+            continue
+          }
+          snapshot.meta.viewportName = t.viewport.name
+          snapshot.meta.target = t.name
+          await writeSnapshotDir(baselineDirFor(pr.baselineDir, t.name, t.viewport.name), snapshot)
+        } catch (error) {
+          pr.absent.set(t.key, (error as Error).message.split('\n')[0]!)
+        }
+      }
+      if (pr.absent.size === baseTargets.length) {
+        const [reason] = pr.absent.values()
+        throw new ElastishotError('E_CAPTURE', `nothing could be captured on ${pr.baseLabel}: ${reason}`)
+      }
+      await sides.stopBase()
+      const pairs: PairReport[] = []
+      for (const t of prTargets(this.config, o.targets ?? [], sides.head.origin)) {
+        checkAbort(o.signal)
+        pairs.push(await this.#runTarget(runDir, t, o, pr))
+      }
+      const context: PrContext = { kind: 'pr', base: { ref: sides.base.ref, sha: sides.base.sha, rule: sides.base.rule }, head: { sha: sides.head.sha, dirty: sides.head.dirty } }
+      const result = await this.#finish(pairs, runDir, runId, {
+        command: 'pr',
+        context,
+        ...(o.junit !== undefined ? { junit: o.junit } : {}),
+        ...(o.failOn !== undefined ? { failOn: o.failOn } : {}),
+      })
+      return { ...result, context }
+    } finally {
+      for (const undo of cleanup.reverse()) await undo().catch((e: Error) => log(`elastishot: cleanup: ${e.message}`))
+    }
+  }
+
+  async #runTarget(runDir: string, t: ResolvedTarget, o: Pick<RunCallOptions, 'update' | 'force' | 'threshold' | 'failOn' | 'capture' | 'images'>, pr?: PrSide): Promise<PairReport> {
     const started = performance.now()
-    const dir = baselineDirFor(this.config.baselineDir, t.name, t.viewport.name)
+    const dir = baselineDirFor(pr?.baselineDir ?? this.config.baselineDir, t.name, t.viewport.name)
     const id = pairId(t.name, t.viewport.name)
     const meta = { id, name: t.name, target: t.name, viewport: t.viewport }
     const captureOptions = this.#captureOptions(t.viewport, { ...t.capture, ...o.capture })
+    // In a pr run both sides share the path; the ports are throwaway.
+    const where = pr ? `${new URL(t.url).pathname}${new URL(t.url).search}` : t.url
     let candidate: ResolvedSide
     try {
-      const snapshot = await this.#capture({ url: t.url, name: t.name }, captureOptions)
+      const snapshot = await this.#capture({ url: t.url, name: t.name }, captureOptions, pr ? 'head' : undefined)
       snapshot.meta.viewportName = t.viewport.name
       snapshot.meta.target = t.name
       candidate = await resolveInput(snapshot)
-      candidate = { ...candidate, source: t.url }
+      candidate = { ...candidate, source: pr ? `${pr.headLabel} ${where}` : t.url }
     } catch (error) {
       const message = (error as Error).message
       const baselineSide = (await isSnapshotDir(dir)) ? await resolveInput(dir) : null
       return this.#errorPair(runDir, meta, baselineSide, null, message, started, t.url)
+    }
+    if (pr && !(await isSnapshotDir(dir))) {
+      return writePairArtifacts(
+        runDir,
+        { ...meta, baseline: { ...candidate, source: `not on ${pr.baseLabel}` }, candidate, result: null, locators: null, status: 'new', failReasons: [`not on ${pr.baseLabel}: ${pr.absent.get(t.key) ?? 'no capture'}`], durationMs: performance.now() - started },
+        { images: o.images ?? this.config.report.images },
+      )
     }
     if (!(await isSnapshotDir(dir))) {
       if (o.update) await writeSnapshotDir(dir, candidate.snapshot!)
@@ -252,7 +361,7 @@ class ElastishotImpl implements Elastishot {
         { images: o.images ?? this.config.report.images },
       )
     }
-    const baseline = await resolveInput(dir)
+    const baseline = pr ? { ...(await resolveInput(dir)), source: `${pr.baseLabel} ${where}` } : await resolveInput(dir)
     // --update --force accepts this capture as the new baseline when it differs.
     const replace = o.update && o.force && candidate.snapshot
       ? async (status: PairStatus): Promise<string[]> => {
@@ -339,12 +448,15 @@ class ElastishotImpl implements Elastishot {
     const report = buildReport(pairs, {
       runId,
       elastishotVersion: ELASTISHOT_VERSION,
-      config: { threshold: this.config.threshold, failOn: o.failOn ?? this.config.failOn, command: o.command, baselineDir: this.config.baselineDir },
+      // The baseline folder matters to approve, which only ever promotes from run.
+      config: { threshold: this.config.threshold, failOn: o.failOn ?? this.config.failOn, command: o.command, ...(o.command === 'run' ? { baselineDir: this.config.baselineDir } : {}) },
+      ...(o.context ? { context: o.context } : {}),
     })
     await mkdir(runDir, { recursive: true })
     const reporters: Reporter[] = [jsonReporter(), htmlReporter({ title: this.config.report.title })]
     const wantJunit = o.junit ?? this.config.report.junit
     if (wantJunit) reporters.push(junitReporter(typeof wantJunit === 'string' ? wantJunit : 'junit.xml'))
+    if (o.command === 'pr' || this.config.report.markdown) reporters.push(markdownReporter({ title: this.config.report.title }))
     reporters.push(...this.#reporters)
     const outputs: ReporterOutput[] = []
     for (const r of reporters) outputs.push(...((await r.report(report, { runDir })) ?? []))
@@ -442,6 +554,20 @@ interface FinishOptions {
   update?: boolean
   force?: boolean
   failOn?: RegionKind[] | 'none'
+  context?: PrContext
+}
+
+/** What #runTarget needs to know in a pr run: where the base captures went and how to label the sides. */
+interface PrSide {
+  baselineDir: string
+  /** Targets the base could not capture, by key, with the reason. */
+  absent: Map<string, string>
+  baseLabel: string
+  headLabel: string
+}
+
+function checkAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new ElastishotError('E_ABORTED', 'interrupted')
 }
 
 async function readRunReport(runDir: string): Promise<ReportJson> {

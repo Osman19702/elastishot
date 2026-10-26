@@ -105,6 +105,8 @@ export interface Reporter {
 export interface CapturedHook {
   target: { url: string; name?: string }
   snapshot: Snapshot
+  /** In a pr run: which side was captured. */
+  side?: 'base' | 'head'
 }
 
 export interface ComparedHook {

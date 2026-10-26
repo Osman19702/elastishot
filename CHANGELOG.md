@@ -32,6 +32,35 @@ uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`elastishot pr`: check a pull request without baselines.**
+  - It checks the base commit out into a temporary git worktree, runs the
+    configured `install` and `build` steps, and serves it next to the working
+    tree, from a folder or with a server command on a port elastishot picked.
+  - It captures every target on both sides in one run with one browser and
+    compares them: no baselines are committed, and font or browser
+    differences between machines cannot creep in.
+  - The base is `--base <ref>`; in a GitHub pull request job, the base side
+    of the merge commit; locally, where the branch left `origin/HEAD`, `main`
+    or `master`.
+  - A page the base does not have is reported as `new` with the reason. A run
+    whose base captured nothing exits 2.
+  - The worktree, the servers and the temporary folder are removed afterwards,
+    on Ctrl-C too. `--keep` leaves them for inspection.
+  - The report records the base and head commits in `context`, and `approve`
+    refuses pr runs.
+  - The new `pr` config block takes `install`, `build`, `serve` and
+    `timeoutMs`; a static site needs none of it.
+- **A Markdown summary:** `summary.md` in the run folder, with one row per pair
+  and the pairs that need a look first. In GitHub Actions the same table is
+  appended to the job summary. `pr` always writes it; `report.markdown: true`
+  turns it on for `run` and `compare`.
+- **`baseUrl` and relative target URLs.** Targets can be paths relative to
+  `baseUrl`, and `run --base-url <url>` points them at another server, such as
+  a local build, for one run.
+- **New public exports.** `elastishot/node` now exports `startStaticServer`
+  (the static server `pr` uses, with an SPA fallback and a base path), the
+  built-in reporters including `markdownReporter`, and `findConfigFile`.
+  `elastishot/report` exports `renderMarkdownSummary`.
 - **`run --update --force`** also replaces baselines that differ from the new
   capture. Those pairs keep their diff and a "baseline replaced" reason, and
   the run exits 0.

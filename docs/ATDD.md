@@ -11,7 +11,7 @@ Elastishot has four automated tiers. The rule for where a test belongs: the oute
 
 ## Acceptance scenarios
 
-`acceptance/features/*.feature` holds one Gherkin file per capability, groups A to G. Every scenario carries an identifier in its title:
+`acceptance/features/*.feature` holds one Gherkin file per capability, groups A to H. Every scenario carries an identifier in its title:
 
 ```
 Scenario: A2 — A collapsed section is reported as removed
@@ -30,12 +30,13 @@ test('A2 — A collapsed section is reported as removed', async () => { ... })
 | A | Comparing two images or two pages | cli | 6 |
 | B | Capturing a page with its element map | browser | 3 |
 | C | Naming what changed | browser, cli | 4 |
-| D | Tracking a URL across deployments | browser, cli | 3 |
+| D | Tracking a URL across deployments | browser, cli | 6 |
 | E | Reports that travel | cli | 5 |
 | F | Looking at a difference | browser | 3 |
 | G | Behaving well in a pipeline | cli | 6 |
+| H | Checking a pull request without baselines | browser, cli, git | 5 |
 
-30 scenarios, all automated; `npm run test:trace` prints the current matrix.
+38 scenarios, all automated; `npm run test:trace` prints the current matrix.
 
 ## Adding a scenario
 

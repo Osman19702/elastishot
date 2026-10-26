@@ -12,7 +12,7 @@ export class UsageError extends ElastishotError {
   }
 }
 
-export const COMMANDS = ['compare', 'snapshot', 'run', 'approve', 'report'] as const
+export const COMMANDS = ['compare', 'snapshot', 'run', 'pr', 'approve', 'report'] as const
 export type Command = (typeof COMMANDS)[number]
 
 export const USAGE = `Usage: elastishot <command> [options]
@@ -21,6 +21,7 @@ Commands
   compare <baseline> <candidate>     Compare two sides: baseline folder, PNG/JPEG path, image URL or page URL each
   snapshot <url>                     Capture a page (PNG + element map + meta) as a baseline
   run [target...]                    Capture and compare every target x viewport from elastishot.config
+  pr [target...]                     Compare the working tree with a base commit, both served here: no baselines needed
   approve [target[/viewport]|runDir] Promote a run's candidate to the baseline (--all for every failed or new pair)
   report <runDir>                    Re-render index.html and junit.xml from a run's report.json
 
@@ -28,6 +29,7 @@ Options
   --out <dir>             Output folder (snapshot: the baseline folder; compare/run: the run folder)
   --config <file>         elastishot.config.(js|mjs|cjs|json) (default: found in this folder or a parent)
   --no-config             compare: ignore any config file and use the defaults
+  --base-url <url>        run: resolve relative target URLs against this instead of the config's baseUrl
   --name <name>           Name of the pair or snapshot (default: derived from the candidate)
   --threshold <0..1>      Minimum similarity to pass (default 0.98)
   --fail-on <kinds>       Comma list of added,removed,changed,moved, or none (default: all)
@@ -41,6 +43,9 @@ Options
   --single-file           Inline every image into the HTML reports
   --update                run: write missing baselines instead of failing them
   --force                 run --update: also replace baselines that differ from this capture
+  --base <ref>            pr: the commit to compare against (default: the pull request's base, or where
+                          this branch left origin/HEAD, main or master)
+  --keep                  pr: keep the base worktree and its temporary folder
   --all                   approve: promote every failed or new pair
   --json                  Print the result as one JSON object and nothing else
   --quiet                 Print only the summary line
@@ -58,6 +63,7 @@ export interface ParsedArgs {
   out?: string
   config?: string
   noConfig: boolean
+  baseUrl?: string
   name?: string
   threshold?: number
   failOn?: RegionKind[] | 'none'
@@ -73,6 +79,8 @@ export interface ParsedArgs {
   singleFile: boolean
   update: boolean
   force: boolean
+  base?: string
+  keep: boolean
   all: boolean
   json: boolean
   quiet: boolean
@@ -113,7 +121,8 @@ export function resolveViewportArg(args: Pick<ParsedArgs, 'viewport' | 'viewport
 const COMMAND_OPTIONS: Record<Command, readonly string[]> = {
   compare: ['out', 'config', 'no-config', 'name', 'threshold', 'fail-on', 'viewport', 'full-page', 'wait-for', 'hide', 'no-map', 'junit', 'junit-file', 'single-file', 'json', 'quiet'],
   snapshot: ['out', 'config', 'name', 'viewport', 'full-page', 'wait-for', 'hide', 'no-map', 'json'],
-  run: ['out', 'config', 'threshold', 'fail-on', 'full-page', 'wait-for', 'hide', 'no-map', 'junit', 'junit-file', 'single-file', 'update', 'force', 'json', 'quiet'],
+  run: ['out', 'config', 'base-url', 'threshold', 'fail-on', 'full-page', 'wait-for', 'hide', 'no-map', 'junit', 'junit-file', 'single-file', 'update', 'force', 'json', 'quiet'],
+  pr: ['out', 'config', 'base', 'keep', 'threshold', 'fail-on', 'full-page', 'wait-for', 'hide', 'no-map', 'junit', 'junit-file', 'single-file', 'json', 'quiet'],
   approve: ['config', 'all', 'json'],
   report: ['config', 'junit', 'junit-file', 'json', 'quiet'],
 }
@@ -122,6 +131,9 @@ const HINTS: Record<string, string> = {
   'run --viewport': 'run captures the viewports in the config; name one target viewport as target/viewport',
   'run --name': 'run names its pairs after the config targets',
   'run --no-config': 'run needs the targets from a config file',
+  'pr --viewport': 'pr captures the viewports in the config',
+  'pr --update': 'pr compares with a base commit and keeps no baselines',
+  'pr --base-url': 'pr serves both sides itself; baseUrl in the config sets the path',
 }
 
 function checkOptions(command: Command, given: string[]): void {
@@ -169,12 +181,14 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
   }
   if (v.force && !v.update) throw new UsageError('--force only works with --update: run --update --force replaces baselines that differ')
   if (v['no-config'] && v.config !== undefined) throw new UsageError('--config and --no-config cannot be used together')
+  if (v['base-url'] !== undefined && !/^https?:\/\//i.test(v['base-url'])) throw new UsageError(`--base-url must be an http(s) URL, got "${v['base-url']}"`)
   return {
     command: (command as Command | undefined) ?? null,
     positionals,
     ...(v.out !== undefined ? { out: v.out } : {}),
     ...(v.config !== undefined ? { config: v.config } : {}),
     noConfig: v['no-config'] ?? false,
+    ...(v['base-url'] !== undefined ? { baseUrl: v['base-url'] } : {}),
     ...(v.name !== undefined ? { name: v.name } : {}),
     ...(threshold !== undefined ? { threshold } : {}),
     ...(v['fail-on'] !== undefined ? { failOn: parseFailOn(v['fail-on']) } : {}),
@@ -189,6 +203,8 @@ export function parseCliArgs(argv: string[]): ParsedArgs {
     singleFile: v['single-file'] ?? false,
     update: v.update ?? false,
     force: v.force ?? false,
+    ...(v.base !== undefined ? { base: v.base } : {}),
+    keep: v.keep ?? false,
     all: v.all ?? false,
     json: v.json ?? false,
     quiet: v.quiet ?? false,
@@ -201,6 +217,7 @@ const OPTIONS = {
   out: { type: 'string' },
   config: { type: 'string' },
   'no-config': { type: 'boolean' },
+  'base-url': { type: 'string' },
   name: { type: 'string' },
   threshold: { type: 'string' },
   'fail-on': { type: 'string' },
@@ -214,6 +231,8 @@ const OPTIONS = {
   'single-file': { type: 'boolean' },
   update: { type: 'boolean' },
   force: { type: 'boolean' },
+  base: { type: 'string' },
+  keep: { type: 'boolean' },
   all: { type: 'boolean' },
   json: { type: 'boolean' },
   quiet: { type: 'boolean' },

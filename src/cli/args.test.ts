@@ -73,3 +73,16 @@ test('bad input is a UsageError with a helpful message', () => {
   assert.equal(parseFailOn('none'), 'none')
   assert.deepEqual(parseViewport('1280x800'), { name: '1280x800', width: 1280, height: 800 })
 })
+
+test('pr takes a base and --keep, and refuses what only run or compare use', () => {
+  const p = parseCliArgs(['pr', 'home', '--base', 'origin/release', '--keep', '--junit', '--hide', '.clock'])
+  assert.equal(p.command, 'pr')
+  assert.deepEqual(p.positionals, ['home'])
+  assert.equal(p.base, 'origin/release')
+  assert.equal(p.keep, true)
+  rejects(['pr', '--viewport', '1280x800'], /--viewport does not apply to pr: pr captures the viewports in the config/)
+  rejects(['pr', '--update'], /--update does not apply to pr: pr compares with a base commit/)
+  rejects(['run', '--keep'], /--keep does not apply to run/)
+  assert.equal(parseCliArgs(['run', '--base-url', 'http://127.0.0.1:4173/']).baseUrl, 'http://127.0.0.1:4173/')
+  rejects(['run', '--base-url', 'localhost:4173'], /--base-url must be an http\(s\) URL/)
+})

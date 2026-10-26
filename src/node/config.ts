@@ -12,6 +12,8 @@ import { REGION_KINDS } from '../core/options.ts'
 import type { Box, CompareOptions, RegionKind } from '../core/types.ts'
 import type { LocatorOptions } from '../locators/index.ts'
 import type { Reporter } from '../pipeline.ts'
+import type { ServeConfig } from './serve.ts'
+import { hasScheme, isHttpUrl, resolveTargetUrl } from './urls.ts'
 
 export interface ViewportConfig {
   name: string
@@ -37,10 +39,37 @@ export interface TargetConfig {
 export interface ReportConfigOptions {
   images?: 'files' | 'inline'
   junit?: boolean
+  /** Also write summary.md, and append it to the GitHub job summary in Actions (pr always does). */
+  markdown?: boolean
   title?: string
 }
 
+/** A step per side of a pr run; false skips that side. */
+export interface PrSteps {
+  base?: string | false
+  head?: string | false
+}
+
+/** How `pr` prepares and serves the base commit and the working tree. */
+export interface PrConfig {
+  /**
+   * Installs dependencies. A string runs in the base worktree only: the working
+   * tree is the one running elastishot, so an install there would replace the
+   * very packages in use. Default: nothing.
+   */
+  install?: string | PrSteps
+  /** Builds the site. A string runs in both trees. Default: nothing. */
+  build?: string | PrSteps
+  /** Default: the config folder itself, through the built-in static server. */
+  serve?: ServeConfig
+  /** The longest an install or build step may take (default 10 minutes). */
+  timeoutMs?: number
+}
+
 export interface ElastishotConfig {
+  /** The URL relative target URLs resolve against; `pr` serves each side on its own origin and keeps this path. */
+  baseUrl?: string
+  pr?: PrConfig
   baselineDir?: string
   outDir?: string
   threshold?: number
@@ -65,6 +94,8 @@ export interface ElastishotConfig {
 export interface ResolvedConfig {
   rootDir: string
   configPath: string | null
+  baseUrl: string | null
+  pr: PrConfig
   baselineDir: string
   outDir: string
   threshold: number
@@ -95,7 +126,7 @@ export interface ResolvedTarget {
 export const CONFIG_FILES = ['elastishot.config.js', 'elastishot.config.mjs', 'elastishot.config.cjs', 'elastishot.config.json']
 export const DEFAULT_VIEWPORTS: ViewportConfig[] = [{ name: 'desktop', width: 1280, height: 800 }]
 
-const KNOWN_KEYS = new Set(['baselineDir', 'outDir', 'threshold', 'failOn', 'minRegionScore', 'viewports', 'capture', 'compare', 'locators', 'report', 'targets', 'ignore', 'reporters'])
+const KNOWN_KEYS = new Set(['baseUrl', 'pr', 'baselineDir', 'outDir', 'threshold', 'failOn', 'minRegionScore', 'viewports', 'capture', 'compare', 'locators', 'report', 'targets', 'ignore', 'reporters'])
 const TARGET_KEYS = new Set(['name', 'url', 'viewports', 'capture', 'compare', 'ignoreRegions', 'ignore', 'expect'])
 const CAPTURE_KEYS = new Set<string>(CAPTURE_OPTION_KEYS)
 
@@ -132,11 +163,37 @@ function validateIgnore(where: string, ignore: unknown): void {
   if (!Array.isArray(ignore) || !ignore.every((s) => typeof s === 'string' && s.trim())) fail(where, 'ignore must be an array of locators')
 }
 
+const PR_KEYS = new Set(['install', 'build', 'serve', 'timeoutMs'])
+const SERVE_KEYS = new Set(['dir', 'spa', 'basePath', 'command', 'ready', 'timeoutMs', 'env'])
+
+function validatePr(where: string, pr: unknown): void {
+  if (!isRecord(pr)) fail(where, 'must be an object')
+  for (const k of Object.keys(pr)) if (!PR_KEYS.has(k)) fail(where, `unknown key "${k}" (known: ${[...PR_KEYS].join(', ')})`)
+  for (const step of ['install', 'build'] as const) {
+    const v = pr[step]
+    if (v === undefined || (typeof v === 'string' && v.trim())) continue
+    if (!isRecord(v) || !Object.entries(v).every(([side, cmd]) => (side === 'base' || side === 'head') && (cmd === false || (typeof cmd === 'string' && cmd.trim())))) {
+      fail(where, `${step} must be a command, or { base, head } with a command or false each`)
+    }
+  }
+  if (pr.timeoutMs !== undefined && !(typeof pr.timeoutMs === 'number' && pr.timeoutMs > 0)) fail(where, 'timeoutMs must be a positive number')
+  const serve = pr.serve
+  if (serve === undefined) return
+  if (!isRecord(serve)) fail(`${where}.serve`, 'must be an object')
+  for (const k of Object.keys(serve)) if (!SERVE_KEYS.has(k)) fail(`${where}.serve`, `unknown key "${k}" (known: ${[...SERVE_KEYS].join(', ')})`)
+  if (serve.dir !== undefined && serve.command !== undefined) fail(`${where}.serve`, 'takes a dir or a command, not both')
+  for (const k of ['dir', 'basePath', 'command'] as const) if (serve[k] !== undefined && (typeof serve[k] !== 'string' || !serve[k])) fail(`${where}.serve`, `${k} must be a non-empty string`)
+  if (serve.ready !== undefined && (!isRecord(serve.ready) || !Object.entries(serve.ready).every(([k, v]) => (k === 'log' || k === 'url') && typeof v === 'string'))) fail(`${where}.serve`, 'ready must be { log?: string, url?: string }')
+  if (serve.env !== undefined && (!isRecord(serve.env) || !Object.values(serve.env).every((v) => typeof v === 'string'))) fail(`${where}.serve`, 'env must map names to strings')
+  if (serve.timeoutMs !== undefined && !(typeof serve.timeoutMs === 'number' && serve.timeoutMs > 0)) fail(`${where}.serve`, 'timeoutMs must be a positive number')
+}
+
 /** Structural validation with the path of the offending key in the message. */
 export function validateConfig(raw: unknown, where = 'config'): ElastishotConfig {
   if (!isRecord(raw)) fail(where, 'must be an object')
   for (const k of Object.keys(raw)) if (!KNOWN_KEYS.has(k)) fail(where, `unknown key "${k}" (known: ${[...KNOWN_KEYS].join(', ')})`)
   const c = raw as ElastishotConfig
+  if (c.baseUrl !== undefined && (typeof c.baseUrl !== 'string' || !isHttpUrl(c.baseUrl))) fail(where, 'baseUrl must be an http(s) URL')
   if (c.baselineDir !== undefined && typeof c.baselineDir !== 'string') fail(where, 'baselineDir must be a string')
   if (c.outDir !== undefined && typeof c.outDir !== 'string') fail(where, 'outDir must be a string')
   if (c.threshold !== undefined && !(typeof c.threshold === 'number' && c.threshold >= 0 && c.threshold <= 1)) fail(where, 'threshold must be a number between 0 and 1')
@@ -164,7 +221,7 @@ export function validateConfig(raw: unknown, where = 'config'): ElastishotConfig
       if (!isRecord(t)) fail(at, 'must be an object')
       for (const k of Object.keys(t)) if (!TARGET_KEYS.has(k)) fail(at, `unknown key "${k}"`)
       if (typeof t.name !== 'string' || !t.name) fail(at, 'needs a name')
-      if (typeof t.url !== 'string' || !/^https?:\/\//i.test(t.url)) fail(at, 'needs an http(s) url')
+      if (typeof t.url !== 'string' || !t.url || (hasScheme(t.url) && !isHttpUrl(t.url))) fail(at, 'needs an http(s) url, or a path relative to baseUrl')
       if (t.viewports !== undefined && (!Array.isArray(t.viewports) || !t.viewports.every((v) => typeof v === 'string'))) fail(at, 'viewports must be an array of viewport names')
       if (t.capture !== undefined) validateCapture(`${at}.capture`, t.capture)
       if (t.ignore !== undefined) validateIgnore(at, t.ignore)
@@ -175,9 +232,11 @@ export function validateConfig(raw: unknown, where = 'config'): ElastishotConfig
   }
   if (c.capture !== undefined) validateCapture(`${where}.capture`, c.capture)
   if (c.ignore !== undefined) validateIgnore(where, c.ignore)
+  if (c.pr !== undefined) validatePr(`${where}.pr`, c.pr)
   if (c.report !== undefined) {
     if (!isRecord(c.report)) fail(where, 'report must be an object')
     if (c.report.images !== undefined && c.report.images !== 'files' && c.report.images !== 'inline') fail(where, 'report.images must be "files" or "inline"')
+    for (const key of ['junit', 'markdown'] as const) if (c.report[key] !== undefined && typeof c.report[key] !== 'boolean') fail(where, `report.${key} must be true or false`)
   }
   if (c.reporters !== undefined && (!Array.isArray(c.reporters) || !c.reporters.every((r) => isRecord(r) && typeof r.report === 'function'))) {
     fail(where, 'reporters must be objects with a report() function')
@@ -194,6 +253,8 @@ export function resolveConfig(raw: ElastishotConfig, rootDir: string, configPath
   return {
     rootDir,
     configPath,
+    baseUrl: raw.baseUrl ?? null,
+    pr: raw.pr ?? {},
     baselineDir: path.resolve(rootDir, raw.baselineDir ?? 'baselines'),
     outDir: path.resolve(rootDir, raw.outDir ?? '.elastishot/runs'),
     threshold: raw.threshold ?? 0.98,
@@ -203,7 +264,7 @@ export function resolveConfig(raw: ElastishotConfig, rootDir: string, configPath
     capture: raw.capture ?? {},
     compare: raw.compare ?? {},
     locators: raw.locators ?? {},
-    report: { images: raw.report?.images ?? 'files', junit: raw.report?.junit ?? false, title: raw.report?.title ?? 'Elastishot report' },
+    report: { images: raw.report?.images ?? 'files', junit: raw.report?.junit ?? false, markdown: raw.report?.markdown ?? false, title: raw.report?.title ?? 'Elastishot report' },
     targets: raw.targets ?? [],
     ignore: raw.ignore ?? [],
     reporters: raw.reporters ?? [],
@@ -256,10 +317,15 @@ export async function loadConfig(cwd = process.cwd(), explicitPath?: string): Pr
   return resolveConfig(validateConfig(raw, path.basename(file)), path.dirname(file), file)
 }
 
-/** Expand targets × viewports; `filter` keeps only the named targets (name or name/viewport). */
-export function resolveTargets(config: ResolvedConfig, filter: string[] = []): ResolvedTarget[] {
+/**
+ * Expand targets × viewports; `filter` keeps only the named targets (name or
+ * name/viewport). Relative target URLs resolve against `baseUrl`, the
+ * config's unless one is given.
+ */
+export function resolveTargets(config: ResolvedConfig, filter: string[] = [], options: { baseUrl?: string } = {}): ResolvedTarget[] {
   const out: ResolvedTarget[] = []
   const wanted = new Set(filter)
+  const baseUrl = options.baseUrl ?? config.baseUrl ?? undefined
   for (const t of config.targets) {
     const names = t.viewports ?? config.viewports.map((v) => v.name)
     for (const vn of names) {
@@ -268,7 +334,7 @@ export function resolveTargets(config: ResolvedConfig, filter: string[] = []): R
       if (wanted.size && !wanted.has(t.name) && !wanted.has(key)) continue
       out.push({
         name: t.name,
-        url: t.url,
+        url: resolveTargetUrl(t.url, baseUrl, t.name),
         viewport,
         capture: { ...config.capture, ...t.capture, ...(t.expect ? { expect: t.expect } : {}) },
         compare: { ...config.compare, ...t.compare, ...(t.ignoreRegions ? { ignoreRegions: t.ignoreRegions } : {}) },

@@ -60,10 +60,10 @@ run(['install', '--no-audit', '--no-fund', '--ignore-scripts', tarball], scratch
 const expect = {
   elastishot: ['comparePair', 'compare', 'loadEngine', 'evaluate', 'resolveCompareOptions', 'ElastishotError'],
   'elastishot/engine': ['createEngine'],
-  'elastishot/locators': ['mapLocators'],
-  'elastishot/report': ['renderSummaryReport', 'renderPairReport', 'buildReport'],
-  'elastishot/node': ['createElastishot', 'loadConfig', 'readImageFile', 'resolveInput'],
-  'elastishot/capture': ['capture', 'createCaptureAdapter'],
+  'elastishot/locators': ['mapLocators', 'resolveIgnore'],
+  'elastishot/report': ['renderSummaryReport', 'renderPairReport', 'buildReport', 'renderMarkdownSummary'],
+  'elastishot/node': ['createElastishot', 'loadConfig', 'readImageFile', 'resolveInput', 'markdownReporter', 'startStaticServer', 'findConfigFile'],
+  'elastishot/capture': ['capture', 'createCaptureAdapter', 'finishAnimations'],
 }
 const probe = `
 const expect = ${JSON.stringify(expect)}

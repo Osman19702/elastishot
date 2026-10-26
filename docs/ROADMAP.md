@@ -57,14 +57,33 @@ Make every result easier to believe and harder to misread.
 - **Resized elements in the report** (already in the element maps) shown in
   the changed-elements table with their old and new size.
 - **Ignore by selector**, not only by box: `ignore: ['[data-testid=clock]']`
-  masks the element wherever it lands.
+  masks the element wherever it lands. *Shipped in 0.3 as ignore by locator.*
 - **Flaky-region memory.** Regions that flip between consecutive runs of the
   same target are flagged as unstable instead of failing the run again.
 - **GitHub Action** with a job summary and the run folder as an artifact.
+  *Shipped in 0.3: `elastishot pr` writes the job summary, and a separate
+  Action wraps it.*
 - **Performance:** worker threads for multi-target runs, optional WASM SIMD
   build of opencv.js.
 
-## 0.3 — Teams (November to December 2026)
+## 0.3 — Pull requests (October 2026)
+
+Make the first useful check one command, with nothing to set up first.
+
+- **`elastishot pr`:** the base commit and the working tree, both served here
+  and captured in one run, compared with no committed baselines. It writes a
+  Markdown summary for the GitHub job summary.
+- **The CLI traps found in field use are fixed:**
+  - `run` honours capture flags;
+  - single-file runs can be approved;
+  - an ad-hoc `compare` no longer breaks `approve`;
+  - `run --update --force` refreshes drifted baselines.
+- **Capture setup for apps that keep state in the browser:** locale, time
+  zone, a pinned clock, a setup hook, storage state objects, finishing
+  animations, an `expect` selector, and redirect warnings.
+- **Ignore by locator**, resolved through the element maps on both sides.
+
+## 0.4 — Teams (November to December 2026)
 
 Make the workflow shared rather than personal.
 

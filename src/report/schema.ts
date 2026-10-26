@@ -66,12 +66,21 @@ export interface ReportTotals {
   errors: number
 }
 
+/** What a pr run compared: the base commit and how it was chosen, and the head. */
+export interface PrContext {
+  kind: 'pr'
+  base: { ref: string; sha: string; rule: string }
+  head: { sha: string; dirty: boolean }
+}
+
 export interface ReportJson {
   schema: typeof REPORT_SCHEMA
   createdAt: string
   elastishotVersion: string
   runId: string
   config: ReportConfig
+  /** Present on runs made by `pr`. */
+  context?: PrContext
   totals: ReportTotals
   pairs: PairReport[]
 }
@@ -80,6 +89,7 @@ export interface ReportMeta {
   runId: string
   elastishotVersion: string
   config: ReportConfig
+  context?: PrContext
   createdAt?: string
 }
 
@@ -97,6 +107,7 @@ export function buildReport(pairs: PairReport[], meta: ReportMeta): ReportJson {
     elastishotVersion: meta.elastishotVersion,
     runId: meta.runId,
     config: meta.config,
+    ...(meta.context ? { context: meta.context } : {}),
     totals,
     pairs,
   }

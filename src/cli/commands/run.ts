@@ -12,6 +12,7 @@ export async function runCommand(args: ParsedArgs, io: CliIo): Promise<number> {
       update: args.update,
       force: args.force,
       ...(Object.keys(capture).length ? { capture } : {}),
+      ...(args.baseUrl ? { baseUrl: args.baseUrl } : {}),
       ...(args.threshold !== undefined ? { threshold: args.threshold } : {}),
       ...(args.failOn !== undefined ? { failOn: args.failOn } : {}),
       ...(args.out ? { out: args.out } : {}),

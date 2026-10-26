@@ -110,3 +110,18 @@ test('capture options are validated, and targets carry their ignore and expect',
   assert.equal(home!.capture.expect, '[data-testid="screen-home"]')
   assert.equal(home!.capture.locale, 'en-GB')
 })
+
+test('baseUrl takes relative target URLs; the pr block is validated', () => {
+  const bad = (raw: unknown, re: RegExp) => assert.throws(() => validateConfig(raw), (e: unknown) => isElastishotError(e, 'E_CONFIG') && re.test((e as Error).message))
+  bad({ baseUrl: 'localhost:3000' }, /baseUrl must be an http\(s\) URL/)
+  bad({ targets: [{ name: 'x', url: 'file:///x' }] }, /needs an http\(s\) url, or a path relative to baseUrl/)
+  bad({ pr: { serve: { dir: 'dist', command: 'npm run preview' } } }, /takes a dir or a command, not both/)
+  bad({ pr: { install: { base: 'npm ci', middle: 'x' } } }, /install must be a command, or \{ base, head \}/)
+  bad({ pr: { serve: { ready: { line: 'Local:' } } } }, /ready must be \{ log\?: string, url\?: string \}/)
+  bad({ pr: { deploy: true } }, /config\.pr: unknown key "deploy"/)
+  const c = resolveConfig(validateConfig({ baseUrl: 'https://a.test/app/', pr: { install: 'npm ci', build: { base: 'npm run build', head: false }, serve: { command: 'npx vite preview --port {port} --strictPort', ready: { log: 'Local:' } } }, targets: [{ name: 'home', url: './' }] }), '/tmp')
+  assert.equal(resolveTargets(c)[0]!.url, 'https://a.test/app/')
+  assert.equal(resolveTargets(c, [], { baseUrl: 'http://127.0.0.1:4173/' })[0]!.url, 'http://127.0.0.1:4173/')
+  const noBase = resolveConfig(validateConfig({ targets: [{ name: 'home', url: '/' }] }), '/tmp')
+  assert.throws(() => resolveTargets(noBase), (e: unknown) => isElastishotError(e, 'E_CONFIG') && /needs baseUrl in the config, or --base-url/.test((e as Error).message))
+})

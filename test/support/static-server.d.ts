@@ -1,6 +1,1 @@
-export interface StaticServer {
-  url: string
-  close(): Promise<void>
-}
-
-export function startStaticServer(root: string, options?: { host?: string; port?: number }): Promise<StaticServer>
+export { startStaticServer, type StaticServer, type StaticServerOptions } from '../../src/node/static-server.ts'
