@@ -3,7 +3,7 @@
  * served on this machine in the same run, so fonts and the browser are the
  * same on both sides and no baseline is ever committed.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -92,7 +92,9 @@ export async function openSides(o: OpenSidesOptions): Promise<OpenedSides> {
     if (!o.keep) await removeWorktree(git, worktree)
   })
   // The config may live below the repository root, as in a monorepo package.
-  const baseRoot = path.join(worktree, path.relative(top, o.configRoot))
+  // Real paths on both sides: git reports the resolved one, and a temporary
+  // or home folder can sit behind a symlink (/tmp on macOS).
+  const baseRoot = path.join(worktree, path.relative(await realpath(top), await realpath(o.configRoot)))
 
   const install = stepsFor(o.pr.install, 'base')
   const build = stepsFor(o.pr.build, 'both')

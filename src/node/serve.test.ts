@@ -23,6 +23,17 @@ test('a command server is ready on the port it was given, and its process tree g
   assert.equal(await portAnswers(port), false)
 })
 
+test('a server the shell started as a child of its own is gone too once stop resolves', async () => {
+  // A second command keeps the shell as the server's parent instead of
+  // letting it hand over to node; the shell can then die before the server.
+  const keepShell = process.platform === 'win32' ? ' & exit /b 0' : '; exit 0'
+  const side = await startSide('head', process.cwd(), { command: `node ${servers}/listen.mjs${keepShell}`, ready: { log: 'listening on' }, timeoutMs: 20_000 })
+  const port = Number(new URL(side.origin).port)
+  assert.equal(await (await fetch(side.origin)).text(), 'side head')
+  await side.stop()
+  assert.equal(await portAnswers(port), false)
+})
+
 test('a command that exits early, or never answers on its port, fails with E_SERVE', async () => {
   await assert.rejects(
     startSide('head', process.cwd(), { command: `node ${servers}/exit.mjs`, timeoutMs: 20_000 }),

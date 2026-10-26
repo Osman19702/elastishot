@@ -3,7 +3,6 @@
  * process tree must be gone when the run ends, however it ends.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
 import net from 'node:net'
 import type { AddressInfo } from 'node:net'
 
@@ -43,10 +42,35 @@ function installExitHook(): void {
 
 const ended = (child: ChildProcess): boolean => child.exitCode !== null || child.signalCode !== null
 
+/**
+ * Whether a POSIX process group still has a member. The shell that started a
+ * server can be gone while the server it forked still listens, so the group,
+ * not the shell, says whether the tree is gone. A member not yet reaped
+ * counts; EPERM means one exists that this process may not signal.
+ */
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+async function until(done: () => boolean, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms
+  for (;;) {
+    if (done()) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
 function killTreeSync(child: ChildProcess): void {
-  if (!child.pid || ended(child)) return
-  if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
-  else {
+  if (!child.pid) return
+  if (process.platform === 'win32') {
+    if (!ended(child)) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+  } else {
     try {
       process.kill(-child.pid, 'SIGKILL')
     } catch {
@@ -88,36 +112,63 @@ export function spawnCommand(command: string, o: SpawnOptions): Spawned {
   child.stderr?.on('data', feed('err'))
   let finished = false
   const exited = new Promise<number | null>((resolve) => {
-    child.on('error', (error) => {
-      lines.push(error.message)
-      finished = true
-      live.delete(child)
-      resolve(null)
-    })
-    child.on('exit', (code) => {
+    const finish = (code: number | null) => {
+      if (finished) return
+      // A last line without a newline is still part of the story.
+      for (const key of ['out', 'err'] as const) {
+        if (rest[key].trim()) {
+          lines.push(rest[key])
+          o.log?.(`[${o.label}] ${rest[key]}`)
+        }
+        rest[key] = ''
+      }
+      if (lines.length > 20) lines.splice(0, lines.length - 20)
       finished = true
       live.delete(child)
       resolve(code)
+    }
+    child.on('error', (error) => {
+      lines.push(error.message)
+      finish(null)
+    })
+    // 'exit' can come before the last output has been read, and an error
+    // message is often exactly that output. 'close' waits for the pipes; a
+    // grandchild that keeps them open must not hold the run up, so 'exit'
+    // finishes the job a moment later if 'close' has not.
+    child.on('close', (code) => finish(code))
+    child.on('exit', (code) => {
+      setTimeout(() => finish(code), 250).unref()
     })
   })
   return { child, tail: () => lines.join('\n'), exited, done: () => finished }
 }
 
-/** Stop a process and everything it started: taskkill on Windows, the process group elsewhere. */
+/**
+ * Stop a process and everything it started, and resolve once all of it is
+ * gone: taskkill /T on Windows, the process group elsewhere, escalating to
+ * SIGKILL after the grace period.
+ */
 export async function killTree(child: ChildProcess, graceMs = 3_000): Promise<void> {
-  if (!child.pid || ended(child)) return
-  const exit = once(child, 'exit').catch(() => undefined)
+  const pid = child.pid
+  if (!pid) return
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
-  } else {
+    if (!ended(child)) spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+    await until(() => ended(child), graceMs)
+  } else if (groupAlive(pid)) {
     try {
-      process.kill(-child.pid, 'SIGTERM')
+      process.kill(-pid, 'SIGTERM')
     } catch {
-      return
+      /* gone in between */
+    }
+    if (!(await until(() => !groupAlive(pid), graceMs))) {
+      try {
+        process.kill(-pid, 'SIGKILL')
+      } catch {
+        /* gone in between */
+      }
+      await until(() => !groupAlive(pid), 1_000)
     }
   }
-  const gone = await Promise.race([exit.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), graceMs).unref())])
-  if (!gone) killTreeSync(child)
   live.delete(child)
 }
 
