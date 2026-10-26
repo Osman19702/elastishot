@@ -6,6 +6,24 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **opencv.js 5.0** (`@techstark/opencv-js` 5.0.0-release.1, up from 4.12). The
+  UI lab's `report.json` is identical on both versions, region for region and
+  score for score, and stage timings are within run-to-run noise. The install
+  grows from about 13 MB to about 16 MB, and the browser download from 12 MB
+  to 13 MB.
+- The package is now built with TypeScript 7. Apart from quote style on import
+  paths, the emitted JavaScript and type declarations are the same as
+  TypeScript 5.9's.
+- Development and tests use Playwright 1.64.1; the peer range is unchanged.
+
+### Documentation
+
+- `docs/MOBILE.md` is now a general guide to native and React Native
+  screenshots. The native roadmap and the smaller items found in field use are
+  in `docs/ROADMAP.md`.
+
 ## [0.2.0] - 2026-09-20
 
 Comparison results move in this release. Pages where side-by-side columns grow
