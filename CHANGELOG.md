@@ -6,6 +6,12 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- `docs/EXAMPLES.md` shows the projects that use Elastishot on every change,
+  with their configs and real reports, and the README links it from a new
+  "In real projects" section.
+
 ## [0.3.0] - 2026-10-26
 
 The headline is `elastishot pr`. It compares the working tree with a base
