@@ -119,6 +119,13 @@ The UI lab in `examples/ui-lab` renders one page in ten builds and records what 
 
 The one remaining region is a stat card whose sparkline was redrawn at a new width after the cards spread out: a real difference, on an element the build did not list. Reproduce it with `node examples/ui-lab/run-lab.mjs --no-video`; the report in `examples/ui-lab/report/index.html` lists every planted change with its verdict and every noise region with its box.
 
+## In real projects
+
+Projects by Elastishot's author that use it on every change. [Their configs and real reports](https://github.com/Osman19702/elastishot/blob/master/docs/EXAMPLES.md) show how each one gets both sides into the same state:
+- **[osmanturalioglu.com](https://github.com/Osman19702/my-portfolio)**, a static site with tabs: `elastishot pr` and the GitHub Action on every pull request, 20 pairs. [Pull request #18](https://github.com/Osman19702/my-portfolio/pull/18) is a real run.
+- **[Whetprompt](https://github.com/Osman19702/Whetprompt)**, a desktop app whose screens only exist after a few steps: each target drives the real interface against the real server and a stub model. Between 0.5.0 and 0.6.0 it named the new Report button, `[data-testid="report-link"]`, and the one digit that changed in "Saved by Whetprompt 0.5.0", a 6 × 9 pixel region.
+- **An unreleased meal app** for phones (Expo, private), checked through its web build with the clock, the locale, the timezone and the stored state pinned. When one pull request dropped a settings row, it named the row, `[data-testid="me-simple-mode"]`, as one region and compared the rows below it in their new place.
+
 ## Tracking a URL across deployments
 
 ```bash
